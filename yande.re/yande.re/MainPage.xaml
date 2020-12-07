@@ -1,0 +1,28 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://xamarin.com/schemas/2014/forms"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="yande.re.MainPage">
+    <StackLayout>
+        <StackLayout x:Name="m_cons">
+            <DatePicker x:Name="m_date"></DatePicker>
+            <Picker x:Name="m_sele"></Picker>
+            <Button Clicked="OnDeleteFile" Text="Delete"></Button>
+            <Button Clicked="OnStart" Text="Start"></Button>
+        </StackLayout>
+        <Label x:Name="m_pagesText"></Label>
+        <CollectionView x:Name="m_view"
+                        SelectionMode="Single"
+                        SelectionChanged="OnCollectionViewSelectionChanged">
+            <CollectionView.ItemsLayout>
+                <LinearItemsLayout Orientation="Vertical"
+                                   SnapPointsType="Mandatory"
+                                   SnapPointsAlignment="End" />
+            </CollectionView.ItemsLayout>
+            <CollectionView.ItemTemplate>
+                <DataTemplate>
+                    <Image Source="{Binding ImageSource}"></Image>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+    </StackLayout>
+</ContentPage>
