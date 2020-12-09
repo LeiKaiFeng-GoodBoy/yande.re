@@ -8,6 +8,30 @@
             <Picker x:Name="m_sele"></Picker>
             <Button Clicked="OnDeleteFile" Text="Delete"></Button>
             <Button Clicked="OnStart" Text="Start"></Button>
+            <StackLayout Orientation="Horizontal">
+                <Label Text="TimeSpan"></Label>
+                <Entry x:Name="m_timespan_value"
+                       WidthRequest="200"
+                       Keyboard="Numeric"></Entry>
+            </StackLayout>
+            <StackLayout Orientation="Horizontal">
+                <Label Text="MaxSize:MB"></Label>
+                <Entry x:Name="m_maxsize_value"
+                       WidthRequest="200"
+                       Keyboard="Numeric"></Entry>
+            </StackLayout>
+            <StackLayout Orientation="Horizontal">
+                <Label Text="ImgCount"></Label>
+                <Entry x:Name="m_imgcount_value"
+                       WidthRequest="200"
+                       Keyboard="Numeric"></Entry>
+            </StackLayout>
+            <StackLayout Orientation="Horizontal">
+                <Label Text="TimeOut"></Label>
+                <Entry x:Name="m_timeout_value"
+                       WidthRequest="200"
+                       Keyboard="Numeric"></Entry>
+            </StackLayout>
         </StackLayout>
         <Label x:Name="m_pagesText"></Label>
         <CollectionView x:Name="m_view"
