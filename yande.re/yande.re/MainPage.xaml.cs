@@ -128,17 +128,18 @@ namespace yande.re
             };
         }
 
-        static async Task<KeyValuePair<Socket, Stream>> CreateYandereConnect(Uri uri)
+        static Task CreateConnectAsync(Socket socket, Uri uri)
         {
-            Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            return socket.ConnectAsync(new Uri(Konachan_Host).Host, 443);
+        }
 
-            await socket.ConnectAsync(new Uri(Konachan_Host).Host, 443).ConfigureAwait(false);
-
-            SslStream sslStream = new SslStream(new NetworkStream(socket, true), false);
+        static async Task<Stream> CreateAuthenticateAsync(Stream stream, Uri uri)
+        {
+            SslStream sslStream = new SslStream(stream, false);
 
             await sslStream.AuthenticateAsClientAsync(uri.Host).ConfigureAwait(false);
 
-            return new KeyValuePair<Socket, Stream>(socket, sslStream);
+            return sslStream;
         }
 
         static MHttpClient GetHttpClient(string host, int maxSize, int poolCount)
@@ -159,7 +160,9 @@ namespace yande.re
 
                 return new MHttpClient(new MHttpClientHandler
                 {
-                    ConnectCallback = CreateYandereConnect,
+                    ConnectCallback = CreateConnectAsync,
+
+                    AuthenticateCallback = CreateAuthenticateAsync,
 
                     MaxResponseSize = 1024 * 1024 * maxSize,
 
@@ -206,14 +209,7 @@ namespace yande.re
 
             while (match.Success)
             {
-                try
-                {
-                    list.Add(new Uri(match.Groups[1].Value));
-                }
-                catch
-                {
-
-                }
+                list.Add(new Uri(match.Groups[1].Value));
 
                 match = match.NextMatch();
             }
@@ -243,7 +239,7 @@ namespace yande.re
     sealed class CreateColl
     {
 
-        static async void GetUris(Http get_content, BlockingCollection<Uri> uris)
+        static async void GetUris(Http get_content, MyChannels<Task<Uri>> uris)
         {
             while (true)
             {
@@ -254,18 +250,18 @@ namespace yande.re
 
                     foreach (var item in list)
                     {
-                        uris.Add(item);
+                        await uris.WriteAsync(Task.FromResult(item)).ConfigureAwait(false);
                     }
                 }
                 catch(Exception e)
                 {
-
+                    await uris.WriteAsync((Task.FromException<Uri>(e))).ConfigureAwait(false);
                 }
 
             }
         }
      
-        static async void GetImage(Http get_content, BlockingCollection<Uri> uris, BlockingCollection<byte[]> imgs)
+        static async void GetImage(Http get_content, MyChannels<Task<Uri>> uris, MyChannels<Task<byte[]>> imgs)
         {
             while (true)
             {
@@ -273,21 +269,21 @@ namespace yande.re
                 
                 try
                 {
-                    Uri uri = uris.Take();
+                    Uri uri = await (await uris.ReadAsync().ConfigureAwait(false)).ConfigureAwait(false);
 
                     byte[] buffer = await get_content.GetImageBytesAsync(uri).ConfigureAwait(false);
 
 
-                    imgs.Add(buffer);
+                    await imgs.WriteAsync((Task.FromResult(buffer))).ConfigureAwait(false);
                 }
                 catch(Exception e)
                 {
-
+                    await imgs.WriteAsync((Task.FromException<byte[]>(e))).ConfigureAwait(false);
                 }
             }
         }
 
-        static void GetImage(Http get_content, BlockingCollection<Uri> uris, BlockingCollection<byte[]> imgs, int imgCount)
+        static void GetImage(Http get_content, MyChannels<Task<Uri>> uris, MyChannels<Task<byte[]>> imgs, int imgCount)
         {
             foreach (var item in Enumerable.Range(0, imgCount))
             {
@@ -295,11 +291,11 @@ namespace yande.re
             }
         }
 
-        public static BlockingCollection<byte[]> Create(Http get_content, int uriCount, int imgCount)
+        public static MyChannels<Task<byte[]>> Create(Http get_content, int uriCount, int imgCount)
         {
-            var uris = new BlockingCollection<Uri>(uriCount);
+            var uris = new MyChannels<Task<Uri>>(uriCount);
 
-            var imgs = new BlockingCollection<byte[]>(imgCount);
+            var imgs = new MyChannels<Task<byte[]>>(imgCount);
 
 
             Task.Run(() => GetUris(get_content, uris));
@@ -329,40 +325,47 @@ namespace yande.re
 
     }
 
-    sealed class InputData
+    static class InputData
     {
         
+        public static DateTime DateTime
+        {
+            get => Preferences.Get(nameof(DateTime), DateTime.Today);
+            set => Preferences.Set(nameof(DateTime), value);
+        }
 
-        public int TimeSpan
+        public static string Host
+        {
+            get=> Preferences.Get(nameof(Host), "");
+
+            set=> Preferences.Set(nameof(Host), value);
+        }
+
+        public static int TimeSpan
         {
             get => Preferences.Get(nameof(TimeSpan), 2);
             set => Preferences.Set(nameof(TimeSpan), value);
         }
 
-        public int MaxSize
+        public static int MaxSize
         {
             get => Preferences.Get(nameof(MaxSize), 5);
             set => Preferences.Set(nameof(MaxSize), value);
         }
 
-        public int ImgCount
+        public static int ImgCount
         {
             get => Preferences.Get(nameof(ImgCount), 6);
             set => Preferences.Set(nameof(ImgCount), value);
         }
 
-        public int TimeOut
+        public static int TimeOut
         {
             get => Preferences.Get(nameof(TimeOut), 60);
             set => Preferences.Set(nameof(TimeOut), value);
         }
 
-        public static InputData Create()
-        {
-            var data = new InputData();
-
-            return data;
-        }
+        
 
         static int F(string s)
         {
@@ -378,78 +381,151 @@ namespace yande.re
         }
 
 
-        public static InputData Create(string timeSpan, string timeOut, string maxSize, string imgCount)
+        public static bool Create(string timeSpan, string timeOut, string maxSize, string imgCount)
         {
-            var data = new InputData();
-
+            
             try
             {
 
-                data.TimeSpan = F(timeSpan);
+                TimeSpan = F(timeSpan);
 
-                data.MaxSize = F(maxSize);
+                MaxSize = F(maxSize);
 
-                data.ImgCount = F(imgCount);
+                ImgCount = F(imgCount);
 
-                data.TimeOut = F(timeOut);
+                TimeOut = F(timeOut);
 
-                return data;
+                return true;
             }
             catch (FormatException)
             {
-                return null;
+                return false;
             }
 
         }
     }
 
+
+    sealed class Awa
+    {
+
+        TaskCompletionSource<object> m_source;
+
+        public void SetAwait()
+        {
+            if (m_source is null)
+            {
+                m_source = new TaskCompletionSource<object>();
+            }
+            else
+            {
+
+            }
+        }
+
+        public void SetAdd()
+        {
+            if (m_source is null)
+            {
+
+            }
+            else
+            {
+                var v = m_source;
+
+                m_source = null;
+
+                v.TrySetResult(default);
+            }
+        }
+
+
+        public Task Get()
+        {
+            if (m_source is null)
+            {
+                return Task.CompletedTask;
+            }
+            else
+            {
+                return m_source.Task;
+            }
+        }
+    }
+
+
     public partial class MainPage : ContentPage
     {
-        const int COLL_VIEW_COUNT = 16;
+        const int COLL_VIEW_COUNT = 32;
 
         const int URI_LOAD_COUNT = 64;
 
-        const string DATE_SAVE_KEY = "m_fdsfsdewtrehfdfb";
-
-        const string HOST_SAVE_KEY = "m_fsfsfderwre3443534";
-        
         const string ROOT_PATH = "/storage/emulated/0/konachan_image";
 
-        readonly ObservableCollection<Data> m_source = new ObservableCollection<Data>(); 
+        readonly ObservableCollection<Data> m_source = new ObservableCollection<Data>();
 
-        DateTime m_dateTime = GetDateTime();
+        readonly Awa m_awa = new Awa();
+
+        DateTime m_dateTime = InputData.DateTime;
 
         public MainPage()
         {
             InitializeComponent();
-            
+
+            InitPermissions();
+        }
+
+        void Init()
+        {
             DeviceDisplay.KeepScreenOn = true;
 
-            SetViewHost();
-
-            SetViewDate();
+            InitSelectView();
 
             SetInput();
 
 
             SetViewImageSource();
+
+
+
+        }
+
+        async void InitPermissions()
+        {
+            var p = await Permissions.RequestAsync<Permissions.StorageWrite>();
+
+            if (p == PermissionStatus.Granted)
+            {
+                Init();
+                
+            }
+            else
+            {
+                Task t = DisplayAlert("错误", "需要存储权限", "确定");
+            }
+        }
+
+        void WriteLog(Exception e)
+        {
+            string s = System.Environment.NewLine;
+
+            File.AppendAllText($"/storage/emulated/0/yande.re.exception.txt", $"{s}{s}{s}{s}{DateTime.Now}{s}{e}", System.Text.Encoding.UTF8);
         }
 
         void SetInput()
         {
-            var data = InputData.Create();
+            m_datetime_value.Date = InputData.DateTime;
 
+            m_timespan_value.Text = InputData.TimeSpan.ToString();
 
-            m_timespan_value.Text = data.TimeSpan.ToString();
+            m_maxsize_value.Text = InputData.MaxSize.ToString();
 
-            m_maxsize_value.Text = data.MaxSize.ToString();
+            m_imgcount_value.Text = InputData.ImgCount.ToString();
 
-            m_imgcount_value.Text = data.ImgCount.ToString();
-
-            m_timeout_value.Text = data.TimeOut.ToString();
+            m_timeout_value.Text = InputData.TimeOut.ToString();
         }
 
-        InputData CreateInput()
+        bool CreateInput()
         {
             return InputData.Create(m_timespan_value.Text, m_timeout_value.Text, m_maxsize_value.Text, m_imgcount_value.Text);
         }
@@ -460,55 +536,31 @@ namespace yande.re
 
             m_pagesText.Text = dateTime.ToString();
 
-            SetDateTime(dateTime);
+            InputData.DateTime = dateTime;
 
             m_dateTime = dateTime.Add(new TimeSpan(-1, 0, 0, 0));
 
             return dateTime;
         }
 
-        
+       
 
-        void SetViewDate()
-        {
-            m_date.Date = m_dateTime;
-        }
-
-        void SetViewHost()
+        void InitSelectView()
         {
             var vs = Http.GetSource();
 
-            string host = GetHost();
+            string host = InputData.Host;
 
             int index = vs.ToList().FindIndex((s) => s == host);
 
             index = index == -1 ? 0 : index;
 
-            m_sele.ItemsSource = vs;
+            m_select_value.ItemsSource = vs;
 
-            m_sele.SelectedIndex = index;
+            m_select_value.SelectedIndex = index;
         }
 
-        static DateTime GetDateTime()
-        {
-
-            return Preferences.Get(DATE_SAVE_KEY, DateTime.Today);
-        }
-
-        static void SetDateTime(DateTime dateTime)
-        {
-            Preferences.Set(DATE_SAVE_KEY, dateTime);
-        }
-
-        static string GetHost()
-        {
-            return Preferences.Get(HOST_SAVE_KEY, "");
-        }
-
-        static void SetHost(string host)
-        {
-            Preferences.Set(HOST_SAVE_KEY, host);
-        }
+        
 
         async Task FlushView()
         {
@@ -519,10 +571,12 @@ namespace yande.re
         {
             var date = new Data(buffer);
 
-            m_source.RemoveAt(0);
+            if(m_source.Count >= COLL_VIEW_COUNT)
+            {
+                m_source.Clear();
+            }
 
             m_source.Add(date);
-
 
             m_view.ScrollTo(m_source.Count - 1, position: ScrollToPosition.End, animate: false);
 
@@ -562,50 +616,56 @@ namespace yande.re
 
         void SetViewImageSource()
         {
-            foreach (var item in Enumerable.Range(0, COLL_VIEW_COUNT))
-            {
-                m_source.Add(new Data(Array.Empty<byte>()));
-            }
-
+            
             m_view.ItemsSource = m_source;
 
         }
 
-        void Start(string host)
-        {
-            var data = CreateInput();
 
-            if(data is null)
-            {
-                DisplayAlert("错误", "Input Error", "确定");
-            }
-            else
-            {
-                Start(host, data);
-            }
-        }
-
-        async void Start(string host, InputData data)
+        async void Start(string host)
         {
+
+            if (CreateInput() == false) 
+            {
+                Task t = DisplayAlert("错误", "Input Error", "确定");
+
+                return;
+            }
 
             var http = new Http(
                 host,
                 () => MainThread.InvokeOnMainThreadAsync(GetNextDateTime),
-                new TimeSpan(0, 0, data.TimeOut),
-                data.MaxSize, data.ImgCount);
+                new TimeSpan(0, 0, InputData.TimeOut),
+                InputData.MaxSize, InputData.ImgCount);
 
-            var imgs = CreateColl.Create(http, URI_LOAD_COUNT, data.ImgCount);
+            var imgs = CreateColl.Create(http, URI_LOAD_COUNT, InputData.ImgCount);
 
 
-            int timeSpan = data.TimeSpan;
+            int timeSpan = InputData.TimeSpan;
             while (true)
             {
-                if (imgs.TryTake(out byte[] buffer))
+                if (imgs.TryRead(out var item))
                 {
-                    await SetImage(buffer);
+                    try
+                    {
+                        await m_awa.Get();
+
+                        await SetImage(await item);
+                       
+                        await Task.Delay(timeSpan * 1000);
+                    }
+                    catch(Exception e)
+                    {
+                        WriteLog(e);
+                    }
+                    
+                }
+                else
+                {
+                    await Task.Delay(timeSpan * 1000);
                 }
 
-                await Task.Delay(timeSpan * 1000);
+                
             }
         }
 
@@ -634,32 +694,32 @@ namespace yande.re
             }
         }
 
-        async void OnStart(object sender, EventArgs e)
+        void OnStart(object sender, EventArgs e)
         {
             m_cons.IsVisible = false;
 
-            m_dateTime = m_date.Date;
+            m_dateTime = m_datetime_value.Date;
 
-            string host = m_sele.SelectedItem.ToString();
+            InputData.DateTime = m_dateTime;
 
-            SetHost(host);
+            string host = m_select_value.SelectedItem.ToString();
 
-            try
+            InputData.Host = host;
+
+            Directory.CreateDirectory(ROOT_PATH);
+
+            Start(host);
+        }
+
+        void OnScrolled(object sender, ItemsViewScrolledEventArgs e)
+        {
+            if ((e.LastVisibleItemIndex + 1) != m_source.Count)
             {
-                var p = await Permissions.RequestAsync<Permissions.StorageWrite>();
-
-                if (p == PermissionStatus.Granted)
-                {
-
-                    Directory.CreateDirectory(ROOT_PATH);
-
-                    Start(host);
-                }
-
+                m_awa.SetAwait();
             }
-            catch
+            else
             {
-                Task t = DisplayAlert("错误", "需要存储权限", "确定");
+                m_awa.SetAdd();
             }
         }
     }

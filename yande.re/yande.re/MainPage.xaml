@@ -4,8 +4,8 @@
              x:Class="yande.re.MainPage">
     <StackLayout>
         <StackLayout x:Name="m_cons">
-            <DatePicker x:Name="m_date"></DatePicker>
-            <Picker x:Name="m_sele"></Picker>
+            <DatePicker x:Name="m_datetime_value"></DatePicker>
+            <Picker x:Name="m_select_value"></Picker>
             <Button Clicked="OnDeleteFile" Text="Delete"></Button>
             <Button Clicked="OnStart" Text="Start"></Button>
             <StackLayout Orientation="Horizontal">
@@ -36,7 +36,8 @@
         <Label x:Name="m_pagesText"></Label>
         <CollectionView x:Name="m_view"
                         SelectionMode="Single"
-                        SelectionChanged="OnCollectionViewSelectionChanged">
+                        SelectionChanged="OnCollectionViewSelectionChanged"
+                        Scrolled="OnScrolled">
             <CollectionView.ItemsLayout>
                 <LinearItemsLayout Orientation="Vertical"
                                    SnapPointsType="Mandatory"
