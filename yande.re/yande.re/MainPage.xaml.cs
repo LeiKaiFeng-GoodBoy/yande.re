@@ -93,6 +93,21 @@ namespace yande.re
 
     sealed class Http
     {
+        public enum WebSite
+        {
+            Konachan,
+            Yandere
+        }
+
+        public enum Popular
+        {
+            Day,
+
+            Week,
+
+            Month
+        }
+
         const string Konachan_Host = "https://konachan.com";
 
         const string Yandere_Host = "https://yande.re";
@@ -104,28 +119,47 @@ namespace yande.re
 
         readonly Uri m_host;
 
-        readonly Func<Task<DateTime>> m_nextPagesFunc;
+        readonly Action<DateTime> m_action;
 
-        public Http(string host, Func<Task<DateTime>> nextPagesFunc, TimeSpan timeOut, int maxSize, int poolCount)
+        readonly Http.Popular m_popular;
+
+        DateTime m_datetime;
+
+        public Http(WebSite webSite, Popular popular, DateTime dateTime, Action<DateTime> action, TimeSpan timeOut, int maxSize, int poolCount)
         {
-            m_request = GetHttpClient(host, maxSize, poolCount);
+            m_request = GetHttpClient(webSite, maxSize, poolCount);
 
-            m_request.TimeOut = timeOut;
+            m_request.ResponseTimeOut = timeOut;
 
-            m_host = GetHost(host);
+            m_host = GetHost(webSite);
 
+            m_datetime = dateTime;
 
-            m_nextPagesFunc = nextPagesFunc;
+            m_popular = popular;
+
+            m_action = action;
 
         }
 
-        public static string[] GetSource()
+        void SubDateTime()
         {
-            return new string[]
+            TimeSpan timeSpan;
+
+            if(m_popular == Popular.Day)
             {
-                Yandere_Host,
-                Konachan_Host
-            };
+                timeSpan = new TimeSpan(-1, 0, 0, 0);
+            }
+            else if(m_popular == Popular.Week)
+            {
+                timeSpan = new TimeSpan(-7, 0, 0, 0);
+            }
+            else
+            {
+                timeSpan = new TimeSpan(-31, 0, 0, 0);
+
+            }
+
+            m_datetime = m_datetime.Add(timeSpan);
         }
 
         static Task CreateConnectAsync(Socket socket, Uri uri)
@@ -142,53 +176,51 @@ namespace yande.re
             return sslStream;
         }
 
-        static MHttpClient GetHttpClient(string host, int maxSize, int poolCount)
+        static MHttpClient GetHttpClient(WebSite webSite, int maxSize, int poolCount)
         {
-            if(host == Konachan_Host)
+            int n = poolCount;
+           
+            poolCount *= 2;
+
+            if (poolCount <= 0)
             {
-                return new MHttpClient();
+                poolCount = n;
+            }
+
+            var handler = new MHttpClientHandler
+            {
+                
+                MaxResponseSize = 1024 * 1024 * maxSize,
+
+                MaxStreamPoolCount = poolCount
+            };
+
+
+
+            if (webSite == WebSite.Konachan)
+            {
+                return new MHttpClient(handler);
             }
             else
             {
-                int n = poolCount;
-                poolCount *= 2;
+                handler.ConnectCallback = CreateConnectAsync;
 
-                if (poolCount <= 0)
-                {
-                    poolCount = n;
-                }
+                handler.AuthenticateCallback = CreateAuthenticateAsync;
 
-                return new MHttpClient(new MHttpClientHandler
-                {
-                    ConnectCallback = CreateConnectAsync,
 
-                    AuthenticateCallback = CreateAuthenticateAsync,
-
-                    MaxResponseSize = 1024 * 1024 * maxSize,
-
-                    MaxStreamPoolCount = poolCount
-                });
+                return new MHttpClient(handler);
             }
         }
 
-        static Uri GetHost(string host)
+        static Uri GetHost(WebSite webSite)
         {
-            if(host == null)
+            if(webSite == WebSite.Yandere)
             {
                 return new Uri(Yandere_Host);
             }
             else
             {
-                string v = GetSource().ToList().Find((s) => s == host);
-
-                if(v == null)
-                {
-                    return new Uri(Yandere_Host);
-                }
-                else
-                {
-                    return new Uri(v);
-                }
+                return new Uri(Konachan_Host);
             }
              
         }
@@ -196,8 +228,26 @@ namespace yande.re
 
         Uri GetUriPath(DateTime dateTime)
         {
-            string s = $"/post/popular_by_day?day={dateTime.Day}&month={dateTime.Month}&year={dateTime.Year}";
+            string s;
+           
+            if (m_popular == Popular.Day)
+            {
+                s = $"/post/popular_by_day?day={dateTime.Day}&month={dateTime.Month}&year={dateTime.Year}";
 
+            }
+            else if (m_popular == Popular.Week)
+            {
+                s = $"/post/popular_by_week?day={dateTime.Day}&month={dateTime.Month}&year={dateTime.Year}";
+
+            }
+            else
+            {
+                s = $"/post/popular_by_month?month={dateTime.Month}&year={dateTime.Year}";
+
+            }
+
+
+            
             return new Uri(m_host, s);
         }
 
@@ -225,11 +275,16 @@ namespace yande.re
 
         public async Task<List<Uri>> GetUrisAsync()
         {
-            DateTime dateTime = await m_nextPagesFunc().ConfigureAwait(false);
+            
+            Uri uri = GetUriPath(m_datetime);
 
-            Uri uri = GetUriPath(dateTime);
-
+            
             string html = await m_request.GetStringAsync(uri).ConfigureAwait(false);
+
+            m_action(m_datetime);
+
+            SubDateTime();
+
 
             return ParseUris(html);
         }
@@ -339,6 +394,13 @@ namespace yande.re
             get=> Preferences.Get(nameof(Host), "");
 
             set=> Preferences.Set(nameof(Host), value);
+        }
+
+        public static string Popular
+        {
+            get => Preferences.Get(nameof(Popular), "");
+
+            set => Preferences.Set(nameof(Popular), value);
         }
 
         public static int TimeSpan
@@ -466,8 +528,6 @@ namespace yande.re
 
         readonly Awa m_awa = new Awa();
 
-        DateTime m_dateTime = InputData.DateTime;
-
         public MainPage()
         {
             InitializeComponent();
@@ -480,6 +540,8 @@ namespace yande.re
             DeviceDisplay.KeepScreenOn = true;
 
             InitSelectView();
+
+            InitPopularView();
 
             SetInput();
 
@@ -530,24 +592,33 @@ namespace yande.re
             return InputData.Create(m_timespan_value.Text, m_timeout_value.Text, m_maxsize_value.Text, m_imgcount_value.Text);
         }
 
-        DateTime GetNextDateTime()
+        void SetDateTime(DateTime dateTime)
         {
-            DateTime dateTime = m_dateTime;
-
+            
             m_pagesText.Text = dateTime.ToString();
 
             InputData.DateTime = dateTime;
 
-            m_dateTime = dateTime.Add(new TimeSpan(-1, 0, 0, 0));
-
-            return dateTime;
         }
 
-       
+        void InitPopularView()
+        {
+            var vs = Enum.GetNames(typeof(Http.Popular));
+
+            string popular = InputData.Popular;
+
+            int index = vs.ToList().FindIndex((s) => s == popular);
+
+            index = index == -1 ? 0 : index;
+
+            m_popular_value.ItemsSource = vs;
+
+            m_popular_value.SelectedIndex = index;
+        }
 
         void InitSelectView()
         {
-            var vs = Http.GetSource();
+            var vs = Enum.GetNames(typeof(Http.WebSite));
 
             string host = InputData.Host;
 
@@ -622,7 +693,7 @@ namespace yande.re
         }
 
 
-        async void Start(string host)
+        async void Start(Http.WebSite webSite, Http.Popular popular, DateTime dateTime)
         {
 
             if (CreateInput() == false) 
@@ -633,8 +704,10 @@ namespace yande.re
             }
 
             var http = new Http(
-                host,
-                () => MainThread.InvokeOnMainThreadAsync(GetNextDateTime),
+                webSite,
+                popular,
+                dateTime,
+                (d) => MainThread.BeginInvokeOnMainThread(()=> SetDateTime(d)),
                 new TimeSpan(0, 0, InputData.TimeOut),
                 InputData.MaxSize, InputData.ImgCount);
 
@@ -698,17 +771,26 @@ namespace yande.re
         {
             m_cons.IsVisible = false;
 
-            m_dateTime = m_datetime_value.Date;
-
-            InputData.DateTime = m_dateTime;
-
             string host = m_select_value.SelectedItem.ToString();
+
+            string popular = m_popular_value.SelectedItem.ToString();
+
+            DateTime dateTime = m_datetime_value.Date;
+
+            SetDateTime(dateTime);
 
             InputData.Host = host;
 
+            InputData.Popular = popular;
+
             Directory.CreateDirectory(ROOT_PATH);
 
-            Start(host);
+
+            var webSize = (Http.WebSite)Enum.Parse(typeof(Http.WebSite), host);
+
+            var p = (Http.Popular)Enum.Parse(typeof(Http.Popular), popular);
+
+            Start(webSize, p, dateTime);
         }
 
         void OnScrolled(object sender, ItemsViewScrolledEventArgs e)
