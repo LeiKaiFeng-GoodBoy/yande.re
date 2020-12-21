@@ -2,20 +2,14 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Net.Http;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Xamarin.Essentials;
 using Xamarin.Forms;
-using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Linq;
-using System.Diagnostics;
-using System.Threading;
 using System.Security.Cryptography;
-using System.Collections.Concurrent;
 using LeiKaiFeng.Http;
 
 namespace yande.re
@@ -795,13 +789,18 @@ namespace yande.re
 
         void OnScrolled(object sender, ItemsViewScrolledEventArgs e)
         {
-            if ((e.LastVisibleItemIndex + 1) != m_source.Count)
+            long n = (long)e.VerticalDelta;
+
+            if (n != 0)
             {
-                m_awa.SetAwait();
-            }
-            else
-            {
-                m_awa.SetAdd();
+                if (n < 0)
+                {
+                    m_awa.SetAwait();
+                }
+                else if (n > 0 && e.LastVisibleItemIndex + 1 == m_source.Count)
+                {
+                    m_awa.SetAdd();
+                }
             }
         }
     }
