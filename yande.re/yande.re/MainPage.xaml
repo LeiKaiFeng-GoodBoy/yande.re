@@ -7,6 +7,7 @@
             <DatePicker x:Name="m_datetime_value"></DatePicker>
             <Picker x:Name="m_select_value"></Picker>
             <Picker x:Name="m_popular_value"></Picker>
+            <Button Clicked="OnResetDateTime" Text="ResetDateTime"></Button>
             <Button Clicked="OnDeleteFile" Text="Delete"></Button>
             <Button Clicked="OnStart" Text="Start"></Button>
             <StackLayout Orientation="Horizontal">

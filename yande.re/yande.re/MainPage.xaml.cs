@@ -686,8 +686,37 @@ namespace yande.re
 
         }
 
+        async void While(MyChannels<Task<byte[]>> imgs, int timeSpan)
+        {
+            while (true)
+            {
+                if (imgs.TryRead(out var item))
+                {
+                    try
+                    {
+                        await m_awa.Get();
 
-        async void Start(Http.WebSite webSite, Http.Popular popular, DateTime dateTime)
+                        await SetImage(await item);
+
+                        await Task.Delay(timeSpan * 1000);
+                    }
+                    catch (Exception e)
+                    {
+                        WriteLog(e);
+                    }
+
+                }
+                else
+                {
+                    await Task.Delay(timeSpan * 1000);
+                }
+
+
+            }
+        }
+
+
+        void Start(Http.WebSite webSite, Http.Popular popular, DateTime dateTime)
         {
 
             if (CreateInput() == false) 
@@ -709,31 +738,8 @@ namespace yande.re
 
 
             int timeSpan = InputData.TimeSpan;
-            while (true)
-            {
-                if (imgs.TryRead(out var item))
-                {
-                    try
-                    {
-                        await m_awa.Get();
 
-                        await SetImage(await item);
-                       
-                        await Task.Delay(timeSpan * 1000);
-                    }
-                    catch(Exception e)
-                    {
-                        WriteLog(e);
-                    }
-                    
-                }
-                else
-                {
-                    await Task.Delay(timeSpan * 1000);
-                }
-
-                
-            }
+            While(imgs, timeSpan);
         }
 
         async void OnDeleteFile(object sender, EventArgs e)
@@ -802,6 +808,11 @@ namespace yande.re
                     m_awa.SetAdd();
                 }
             }
+        }
+
+        void OnResetDateTime(object sender, EventArgs e)
+        {
+            m_datetime_value.Date = DateTime.Today;
         }
     }
 }
