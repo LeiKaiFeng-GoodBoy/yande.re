@@ -551,7 +551,7 @@ namespace yande.re
 
     public partial class MainPage : ContentPage
     {
-        const int COLL_VIEW_COUNT = 32;
+        const int COLL_VIEW_COUNT = 6;
 
         const int URI_LOAD_COUNT = 64;
 

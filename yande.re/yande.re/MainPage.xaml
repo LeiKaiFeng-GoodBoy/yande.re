@@ -1,7 +1,8 @@
 ﻿<?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://xamarin.com/schemas/2014/forms"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="yande.re.MainPage">
+             x:Class="yande.re.MainPage"
+             xmlns:data="clr-namespace:yande.re">
     <StackLayout>
         <StackLayout x:Name="m_cons">
             <StackLayout x:Name="m_datetime_value_father">
@@ -54,7 +55,7 @@
                                    SnapPointsAlignment="End" />
             </CollectionView.ItemsLayout>
             <CollectionView.ItemTemplate>
-                <DataTemplate>
+                <DataTemplate x:DataType="data:Data">
                     <Image Source="{Binding ImageSource}"></Image>
                 </DataTemplate>
             </CollectionView.ItemTemplate>
