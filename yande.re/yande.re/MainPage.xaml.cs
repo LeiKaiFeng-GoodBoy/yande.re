@@ -95,6 +95,8 @@ namespace yande.re
 
         public enum Popular
         {
+            Pages,
+
             Day,
 
             Week,
@@ -113,13 +115,13 @@ namespace yande.re
 
         readonly Uri m_host;
 
-        readonly Action<DateTime> m_action;
+        readonly Action<object> m_action;
 
         readonly Http.Popular m_popular;
 
-        DateTime m_datetime;
+        object m_obj;
 
-        public Http(WebSite webSite, Popular popular, DateTime dateTime, Action<DateTime> action, TimeSpan timeOut, int maxSize, int poolCount)
+        public Http(WebSite webSite, Popular popular, object obj, Action<object> action, TimeSpan timeOut, int maxSize, int poolCount)
         {
             m_request = GetHttpClient(webSite, maxSize, poolCount);
 
@@ -127,7 +129,7 @@ namespace yande.re
 
             m_host = GetHost(webSite);
 
-            m_datetime = dateTime;
+            m_obj = obj;
 
             m_popular = popular;
 
@@ -137,23 +139,34 @@ namespace yande.re
 
         void SubDateTime()
         {
-            TimeSpan timeSpan;
+            if (m_popular == Popular.Pages)
+            {
+                int n = (int)m_obj;
 
-            if(m_popular == Popular.Day)
-            {
-                timeSpan = new TimeSpan(-1, 0, 0, 0);
-            }
-            else if(m_popular == Popular.Week)
-            {
-                timeSpan = new TimeSpan(-7, 0, 0, 0);
+                m_obj = (n + 1);
             }
             else
             {
-                timeSpan = new TimeSpan(-31, 0, 0, 0);
+                TimeSpan timeSpan;
 
+                if (m_popular == Popular.Day)
+                {
+                    timeSpan = new TimeSpan(-1, 0, 0, 0);
+                }
+                else if (m_popular == Popular.Week)
+                {
+                    timeSpan = new TimeSpan(-7, 0, 0, 0);
+                }
+                else
+                {
+                    timeSpan = new TimeSpan(-31, 0, 0, 0);
+
+                }
+
+                m_obj = ((DateTime)m_obj).Add(timeSpan);
             }
 
-            m_datetime = m_datetime.Add(timeSpan);
+            
         }
 
         static Task CreateConnectAsync(Socket socket, Uri uri)
@@ -220,25 +233,39 @@ namespace yande.re
         }
 
 
-        Uri GetUriPath(DateTime dateTime)
+        Uri GetUriPath()
         {
             string s;
-           
-            if (m_popular == Popular.Day)
-            {
-                s = $"/post/popular_by_day?day={dateTime.Day}&month={dateTime.Month}&year={dateTime.Year}";
 
-            }
-            else if (m_popular == Popular.Week)
+            if (m_popular == Popular.Pages)
             {
-                s = $"/post/popular_by_week?day={dateTime.Day}&month={dateTime.Month}&year={dateTime.Year}";
-
+                int n = (int)m_obj;
+            
+                s = $"/post?page={n}";
             }
             else
             {
-                s = $"/post/popular_by_month?month={dateTime.Month}&year={dateTime.Year}";
+                DateTime dateTime = (DateTime)m_obj;
 
+                if (m_popular == Popular.Day)
+                {
+                    s = $"/post/popular_by_day?day={dateTime.Day}&month={dateTime.Month}&year={dateTime.Year}";
+
+                }
+                else if (m_popular == Popular.Week)
+                {
+                    s = $"/post/popular_by_week?day={dateTime.Day}&month={dateTime.Month}&year={dateTime.Year}";
+
+                }
+                else
+                {
+                    s = $"/post/popular_by_month?month={dateTime.Month}&year={dateTime.Year}";
+
+                }
+               
             }
+
+            
 
 
             
@@ -270,12 +297,12 @@ namespace yande.re
         public async Task<List<Uri>> GetUrisAsync()
         {
             
-            Uri uri = GetUriPath(m_datetime);
+            Uri uri = GetUriPath();
 
             
             string html = await m_request.GetStringAsync(uri).ConfigureAwait(false);
 
-            m_action(m_datetime);
+            m_action(m_obj);
 
             SubDateTime();
 
@@ -376,7 +403,13 @@ namespace yande.re
 
     static class InputData
     {
-        
+     
+        public static int Pages
+        {
+            get => Preferences.Get(nameof(Pages), 1);
+            set => Preferences.Set(nameof(Pages), value);
+        }
+
         public static DateTime DateTime
         {
             get => Preferences.Get(nameof(DateTime), DateTime.Today);
@@ -437,7 +470,7 @@ namespace yande.re
         }
 
 
-        public static bool Create(string timeSpan, string timeOut, string maxSize, string imgCount)
+        public static bool Create(string timeSpan, string timeOut, string maxSize, string imgCount, string pages, string host, string populat)
         {
             
             try
@@ -450,6 +483,12 @@ namespace yande.re
                 ImgCount = F(imgCount);
 
                 TimeOut = F(timeOut);
+
+                Pages = F(pages);
+
+                Host = host;
+
+                Popular = populat;
 
                 return true;
             }
@@ -568,8 +607,26 @@ namespace yande.re
             File.AppendAllText($"/storage/emulated/0/yande.re.exception.txt", $"{s}{s}{s}{s}{DateTime.Now}{s}{e}", System.Text.Encoding.UTF8);
         }
 
+        void ChangeInputVisible(Http.Popular popular)
+        {
+            if (popular == Http.Popular.Pages)
+            {
+                m_datetime_value_father.IsVisible = false;
+
+                m_pages_value_father.IsVisible = true;
+            }
+            else
+            {
+                m_datetime_value_father.IsVisible = true;
+
+                m_pages_value_father.IsVisible = false;
+            }
+        }
+
         void SetInput()
         {
+            m_pages_value.Text = InputData.Pages.ToString();
+
             m_datetime_value.Date = InputData.DateTime;
 
             m_timespan_value.Text = InputData.TimeSpan.ToString();
@@ -583,7 +640,7 @@ namespace yande.re
 
         bool CreateInput()
         {
-            return InputData.Create(m_timespan_value.Text, m_timeout_value.Text, m_maxsize_value.Text, m_imgcount_value.Text);
+            return InputData.Create(m_timespan_value.Text, m_timeout_value.Text, m_maxsize_value.Text, m_imgcount_value.Text, m_pages_value.Text, m_select_value.SelectedItem.ToString(), m_popular_value.SelectedItem.ToString());
         }
 
         void SetDateTime(DateTime dateTime)
@@ -593,6 +650,13 @@ namespace yande.re
 
             InputData.DateTime = dateTime;
 
+        }
+
+        void SetPages(int n)
+        {
+            m_pagesText.Text = n.ToString();
+
+            InputData.Pages = n;
         }
 
         void InitPopularView()
@@ -608,6 +672,8 @@ namespace yande.re
             m_popular_value.ItemsSource = vs;
 
             m_popular_value.SelectedIndex = index;
+
+            OnPopularSelect(m_popular_value, EventArgs.Empty);
         }
 
         void InitSelectView()
@@ -716,21 +782,25 @@ namespace yande.re
         }
 
 
-        void Start(Http.WebSite webSite, Http.Popular popular, DateTime dateTime)
+        void Start(Http.WebSite webSite, Http.Popular popular, object obj)
         {
+            Action<object> action;
 
-            if (CreateInput() == false) 
+            if (popular != Http.Popular.Pages)
             {
-                Task t = DisplayAlert("错误", "Input Error", "确定");
-
-                return;
+                action = (d) => MainThread.BeginInvokeOnMainThread(() => SetDateTime((DateTime)d));
             }
+            else
+            {
+                action = (n) => MainThread.BeginInvokeOnMainThread(() => SetPages((int)n));
+            }
+            
 
             var http = new Http(
                 webSite,
                 popular,
-                dateTime,
-                (d) => MainThread.BeginInvokeOnMainThread(()=> SetDateTime(d)),
+                obj,
+                action,
                 new TimeSpan(0, 0, InputData.TimeOut),
                 InputData.MaxSize, InputData.ImgCount);
 
@@ -769,28 +839,38 @@ namespace yande.re
 
         void OnStart(object sender, EventArgs e)
         {
+            if (CreateInput() == false)
+            {
+                Task t = DisplayAlert("错误", "Input Error", "确定");
+
+                return;
+            }
+
             m_cons.IsVisible = false;
-
-            string host = m_select_value.SelectedItem.ToString();
-
-            string popular = m_popular_value.SelectedItem.ToString();
-
-            DateTime dateTime = m_datetime_value.Date;
-
-            SetDateTime(dateTime);
-
-            InputData.Host = host;
-
-            InputData.Popular = popular;
 
             Directory.CreateDirectory(ROOT_PATH);
 
+            var webSize = (Http.WebSite)Enum.Parse(typeof(Http.WebSite), InputData.Host);
 
-            var webSize = (Http.WebSite)Enum.Parse(typeof(Http.WebSite), host);
+            var p = (Http.Popular)Enum.Parse(typeof(Http.Popular), InputData.Popular);
 
-            var p = (Http.Popular)Enum.Parse(typeof(Http.Popular), popular);
+            if(p == Http.Popular.Pages)
+            {
+                int n = InputData.Pages;
 
-            Start(webSize, p, dateTime);
+                SetPages(n);
+
+                Start(webSize, p, n);
+            }
+            else
+            {
+                DateTime dateTime = m_datetime_value.Date;
+
+                SetDateTime(dateTime);
+
+                Start(webSize, p, dateTime);
+            }
+
         }
 
         void OnScrolled(object sender, ItemsViewScrolledEventArgs e)
@@ -813,6 +893,11 @@ namespace yande.re
         void OnResetDateTime(object sender, EventArgs e)
         {
             m_datetime_value.Date = DateTime.Today;
+        }
+
+        void OnPopularSelect(object sender, EventArgs e)
+        {
+            ChangeInputVisible((Http.Popular)Enum.Parse(typeof(Http.Popular), m_popular_value.SelectedItem.ToString()));
         }
     }
 }
