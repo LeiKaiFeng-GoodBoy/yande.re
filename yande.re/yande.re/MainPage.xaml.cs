@@ -551,7 +551,7 @@ namespace yande.re
 
     public partial class MainPage : ContentPage
     {
-        const int COLL_VIEW_COUNT = 6;
+        const int COLL_VIEW_COUNT = 32;
 
         const int URI_LOAD_COUNT = 64;
 
@@ -698,15 +698,15 @@ namespace yande.re
             if(m_source.Count >= COLL_VIEW_COUNT)
             {
                 m_source.Clear();
-            }
 
-            await Task.Yield();
+                await Task.Yield();
+            }
 
             m_source.Add(new Data(buffer));
 
             await Task.Yield();
 
-            m_view.ScrollTo(m_source.Count - 1, position: ScrollToPosition.End, animate: true);
+            m_view.ScrollTo(m_source.Count - 1, position: ScrollToPosition.End, animate: false);
 
             await Task.Yield();
         }
