@@ -693,25 +693,22 @@ namespace yande.re
 
         
 
-        async Task FlushView()
+        async Task SetImage(byte[] buffer)
         {
-            await Task.Yield();
-        }
-
-        Task SetImage(byte[] buffer)
-        {
-            var date = new Data(buffer);
-
             if(m_source.Count >= COLL_VIEW_COUNT)
             {
                 m_source.Clear();
             }
 
-            m_source.Add(date);
+            await Task.Yield();
 
-            m_view.ScrollTo(m_source.Count - 1, position: ScrollToPosition.End, animate: false);
+            m_source.Add(new Data(buffer));
 
-            return FlushView();
+            await Task.Yield();
+
+            m_view.ScrollTo(m_source.Count - 1, position: ScrollToPosition.End, animate: true);
+
+            await Task.Yield();
         }
 
         static async Task SaveImage(byte[] buffer)
@@ -750,34 +747,27 @@ namespace yande.re
             
             m_view.ItemsSource = m_source;
 
+            
         }
 
         async void While(MyChannels<Task<byte[]>> imgs, int timeSpan)
         {
             while (true)
             {
-                if (imgs.TryRead(out var item))
+                try
                 {
-                    try
-                    {
-                        await m_awa.Get();
+                    await m_awa.Get();
 
-                        await SetImage(await item);
+                    var item = await await imgs.ReadAsync();
 
-                        await Task.Delay(timeSpan * 1000);
-                    }
-                    catch (Exception e)
-                    {
-                        WriteLog(e);
-                    }
+                    await SetImage(item);
 
-                }
-                else
-                {
                     await Task.Delay(timeSpan * 1000);
                 }
-
-
+                catch (Exception e)
+                {
+                    WriteLog(e);
+                }
             }
         }
 
