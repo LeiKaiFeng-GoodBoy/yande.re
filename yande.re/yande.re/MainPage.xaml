@@ -51,7 +51,7 @@
                         Scrolled="OnScrolled">
             <CollectionView.ItemsLayout>
                 <LinearItemsLayout Orientation="Vertical"
-                                   SnapPointsType="MandatorySingle"
+                                   SnapPointsType="Mandatory"
                                    SnapPointsAlignment="End" />
             </CollectionView.ItemsLayout>
             <CollectionView.ItemTemplate>
