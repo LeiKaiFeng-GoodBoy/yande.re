@@ -315,7 +315,7 @@ namespace yande.re
     sealed class CreateColl
     {
 
-        static async void GetUris(Http get_content, MyChannels<Task<Uri>> uris)
+        static async Task GetUris(Http get_content, MyChannels<Task<Uri>> uris)
         {
             while (true)
             {
@@ -337,7 +337,7 @@ namespace yande.re
             }
         }
      
-        static async void GetImage(Http get_content, MyChannels<Task<Uri>> uris, MyChannels<Task<byte[]>> imgs)
+        static async Task GetImage(Http get_content, MyChannels<Task<Uri>> uris, MyChannels<Task<byte[]>> imgs)
         {
             while (true)
             {
@@ -551,9 +551,11 @@ namespace yande.re
 
     public partial class MainPage : ContentPage
     {
-        const int COLL_VIEW_COUNT = 32;
+        const int COLL_VIEW_COUNT = 6;
 
         const int URI_LOAD_COUNT = 64;
+
+        const int FLSH_COUNT = 32;
 
         const string ROOT_PATH = "/storage/emulated/0/konachan_image";
 
@@ -561,11 +563,13 @@ namespace yande.re
 
         readonly Awa m_awa = new Awa();
 
+        int m_count;
+
         public MainPage()
         {
             InitializeComponent();
 
-            InitPermissions();
+            Task t = InitPermissions();
         }
 
         void Init()
@@ -585,7 +589,7 @@ namespace yande.re
 
         }
 
-        async void InitPermissions()
+        async Task InitPermissions()
         {
             var p = await Permissions.RequestAsync<Permissions.StorageWrite>();
 
@@ -695,12 +699,29 @@ namespace yande.re
 
         async Task SetImage(byte[] buffer)
         {
-            if(m_source.Count >= COLL_VIEW_COUNT)
+            m_count++;
+
+            if (m_source.Count >= COLL_VIEW_COUNT)
             {
-                m_source.Clear();
+                if (m_count >= FLSH_COUNT)
+                {
+                    m_count = 0;
+
+                    m_source.Clear();
+
+                    
+                }
+                else
+                {
+                    m_source.RemoveAt(0);
+
+                    
+                }
 
                 await Task.Yield();
             }
+            
+            
 
             m_source.Add(new Data(buffer));
 
@@ -750,7 +771,7 @@ namespace yande.re
             
         }
 
-        async void While(MyChannels<Task<byte[]>> imgs, int timeSpan)
+        async Task While(MyChannels<Task<byte[]>> imgs, int timeSpan)
         {
             while (true)
             {
@@ -799,7 +820,7 @@ namespace yande.re
 
             int timeSpan = InputData.TimeSpan;
 
-            While(imgs, timeSpan);
+            Task t = While(imgs, timeSpan);
         }
 
         async void OnDeleteFile(object sender, EventArgs e)
