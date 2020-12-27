@@ -90,7 +90,8 @@ namespace yande.re
         public enum WebSite
         {
             Konachan,
-            Yandere
+            Yandere,
+            Lolibooru
         }
 
         public enum Popular
@@ -108,8 +109,9 @@ namespace yande.re
 
         const string Yandere_Host = "https://yande.re";
 
+        const string Loli_Host = "https://lolibooru.moe";
 
-        readonly Regex m_regex = new Regex(@"<a class=""directlink largeimg"" href=""([^""]+)""");
+        readonly Regex m_regex = new Regex(@"<a class=""directlink (?:largeimg|smallimg)"" href=""([^""]+)""");
 
         readonly MHttpClient m_request;
 
@@ -204,7 +206,7 @@ namespace yande.re
 
 
 
-            if (webSite == WebSite.Konachan)
+            if (webSite != WebSite.Yandere)
             {
                 return new MHttpClient(handler);
             }
@@ -225,9 +227,13 @@ namespace yande.re
             {
                 return new Uri(Yandere_Host);
             }
-            else
+            else if(webSite == WebSite.Konachan)
             {
                 return new Uri(Konachan_Host);
+            }
+            else
+            {
+                return new Uri(Loli_Host);
             }
              
         }
@@ -708,8 +714,6 @@ namespace yande.re
                     m_count = 0;
 
                     m_source.Clear();
-
-                    
                 }
                 else
                 {
@@ -734,20 +738,12 @@ namespace yande.re
 
         static async Task SaveImage(byte[] buffer)
         {
-            try
+            string name = Path.Combine(ROOT_PATH, Path.GetRandomFileName() + ".png");
+
+            using (var file = new FileStream(name, FileMode.Create, FileAccess.Write, FileShare.None, 4096, true))
             {
 
-                string name = Path.Combine(ROOT_PATH, Path.GetRandomFileName() + ".png");
-
-                using (var file = new FileStream(name, FileMode.Create, FileAccess.Write, FileShare.None, 4096, true))
-                {
-
-                    await file.WriteAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
-                }
-            }
-            catch(Exception e)
-            {
-                
+                await file.WriteAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
             }
         }
 
@@ -784,6 +780,10 @@ namespace yande.re
                     await SetImage(item);
 
                     await Task.Delay(timeSpan * 1000);
+                }
+                catch(MHttpClientException)
+                {
+
                 }
                 catch (Exception e)
                 {
