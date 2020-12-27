@@ -90,8 +90,7 @@ namespace yande.re
         public enum WebSite
         {
             Konachan,
-            Yandere,
-            Lolibooru
+            Yandere
         }
 
         public enum Popular
@@ -108,8 +107,6 @@ namespace yande.re
         const string Konachan_Host = "https://konachan.com";
 
         const string Yandere_Host = "https://yande.re";
-
-        const string Loli_Host = "https://lolibooru.moe";
 
         readonly Regex m_regex = new Regex(@"<a class=""directlink (?:largeimg|smallimg)"" href=""([^""]+)""");
 
@@ -227,14 +224,11 @@ namespace yande.re
             {
                 return new Uri(Yandere_Host);
             }
-            else if(webSite == WebSite.Konachan)
+            else
             {
                 return new Uri(Konachan_Host);
             }
-            else
-            {
-                return new Uri(Loli_Host);
-            }
+            
              
         }
 
