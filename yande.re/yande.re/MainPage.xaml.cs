@@ -48,16 +48,8 @@ namespace yande.re
 
             foreach (var path in paths)
             {
-                string hash;
-                try
-                {
-                    hash = GetFileHashCode(path);
-                }
-                catch (Exception e)
-                {
-                    
-                    continue;
-                }
+                string hash = GetFileHashCode(path);
+                
 
                 if (dic.TryGetValue(hash, out var list))
                 {
@@ -85,7 +77,7 @@ namespace yande.re
         }
     }
 
-    sealed class Http
+    abstract class GetWebSiteContent
     {
         public enum WebSite
         {
@@ -114,13 +106,9 @@ namespace yande.re
 
         readonly Uri m_host;
 
-        readonly Action<object> m_action;
+        
 
-        readonly Http.Popular m_popular;
-
-        object m_obj;
-
-        public Http(WebSite webSite, Popular popular, object obj, Action<object> action, TimeSpan timeOut, int maxSize, int poolCount)
+        public GetWebSiteContent(WebSite webSite, TimeSpan timeOut, int maxSize, int poolCount)
         {
             m_request = GetHttpClient(webSite, maxSize, poolCount);
 
@@ -128,45 +116,11 @@ namespace yande.re
 
             m_host = GetHost(webSite);
 
-            m_obj = obj;
-
-            m_popular = popular;
-
-            m_action = action;
-
         }
 
-        void SubDateTime()
-        {
-            if (m_popular == Popular.Pages)
-            {
-                int n = (int)m_obj;
+        protected abstract void SetView();
 
-                m_obj = (n + 1);
-            }
-            else
-            {
-                TimeSpan timeSpan;
-
-                if (m_popular == Popular.Day)
-                {
-                    timeSpan = new TimeSpan(-1, 0, 0, 0);
-                }
-                else if (m_popular == Popular.Week)
-                {
-                    timeSpan = new TimeSpan(-7, 0, 0, 0);
-                }
-                else
-                {
-                    timeSpan = new TimeSpan(-31, 0, 0, 0);
-
-                }
-
-                m_obj = ((DateTime)m_obj).Add(timeSpan);
-            }
-
-            
-        }
+        protected abstract void SetNext();
 
         static Task CreateConnectAsync(Socket socket, Uri uri)
         {
@@ -184,21 +138,13 @@ namespace yande.re
 
         static MHttpClient GetHttpClient(WebSite webSite, int maxSize, int poolCount)
         {
-            int n = poolCount;
            
-            poolCount *= 2;
-
-            if (poolCount <= 0)
-            {
-                poolCount = n;
-            }
-
             var handler = new MHttpClientHandler
             {
-                
+
                 MaxResponseSize = 1024 * 1024 * maxSize,
 
-                MaxStreamPoolCount = poolCount
+                MaxStreamPoolCount = checked(poolCount * 2)
             };
 
 
@@ -233,44 +179,12 @@ namespace yande.re
         }
 
 
-        Uri GetUriPath()
+        Uri GetUri()
         {
-            string s;
-
-            if (m_popular == Popular.Pages)
-            {
-                int n = (int)m_obj;
-            
-                s = $"/post?page={n}";
-            }
-            else
-            {
-                DateTime dateTime = (DateTime)m_obj;
-
-                if (m_popular == Popular.Day)
-                {
-                    s = $"/post/popular_by_day?day={dateTime.Day}&month={dateTime.Month}&year={dateTime.Year}";
-
-                }
-                else if (m_popular == Popular.Week)
-                {
-                    s = $"/post/popular_by_week?day={dateTime.Day}&month={dateTime.Month}&year={dateTime.Year}";
-
-                }
-                else
-                {
-                    s = $"/post/popular_by_month?month={dateTime.Month}&year={dateTime.Year}";
-
-                }
-               
-            }
-
-            
-
-
-            
-            return new Uri(m_host, s);
+            return new Uri(m_host, GetUriPath());
         }
+
+        protected abstract string GetUriPath();
 
         List<Uri> ParseUris(string html)
         {
@@ -297,14 +211,14 @@ namespace yande.re
         public async Task<List<Uri>> GetUrisAsync()
         {
             
-            Uri uri = GetUriPath();
+            Uri uri = GetUri();
 
             
             string html = await m_request.GetStringAsync(uri).ConfigureAwait(false);
 
-            m_action(m_obj);
+            SetView();
 
-            SubDateTime();
+            SetNext();
 
 
             return ParseUris(html);
@@ -312,10 +226,139 @@ namespace yande.re
 
     }
 
+    sealed class GetPagesContent : GetWebSiteContent
+    {
+
+        int m_pages;
+
+        readonly Action<int> m_action;
+
+
+
+        public GetPagesContent(
+            WebSite webSite,
+            int pages,
+            Action<int> action,
+            TimeSpan timeOut,
+            int maxSize,
+            int poolCount) : base(webSite,
+                                timeOut,
+                                maxSize,
+                                poolCount)
+        {
+
+            m_pages = pages;
+
+            m_action = action;
+        }
+
+        protected override string GetUriPath()
+        {
+            
+            return $"/post?page={m_pages}";
+
+        }
+
+        protected override void SetView()
+        {
+            m_action(m_pages);
+        }
+
+        protected override void SetNext()
+        {
+            m_pages++;
+        }
+    }
+
+    sealed class GetDateTimeContent : GetWebSiteContent
+    {
+        DateTime m_dateTime;
+
+        readonly Action<DateTime> m_action;
+
+        readonly Popular m_popular;
+
+        public GetDateTimeContent(
+            WebSite webSite,
+            Popular popular,
+            DateTime dateTime,
+            Action<DateTime> action,
+            TimeSpan timeOut,
+            int maxSize,
+            int poolCount) : base(webSite,
+                                timeOut,
+                                maxSize,
+                                poolCount)
+        {
+
+            if (popular == Popular.Pages)
+            {
+                throw new ArgumentException("应该是按日期");
+            }
+
+            m_popular = popular;
+
+            m_dateTime = dateTime;
+
+            m_action = action;
+        }
+
+        protected override string GetUriPath()
+        {
+            string s;
+
+            DateTime dateTime = m_dateTime;
+
+            if (m_popular == Popular.Day)
+            {
+                s = $"/post/popular_by_day?day={dateTime.Day}&month={dateTime.Month}&year={dateTime.Year}";
+
+            }
+            else if (m_popular == Popular.Week)
+            {
+                s = $"/post/popular_by_week?day={dateTime.Day}&month={dateTime.Month}&year={dateTime.Year}";
+
+            }
+            else
+            {
+                s = $"/post/popular_by_month?month={dateTime.Month}&year={dateTime.Year}";
+
+            }
+
+            return s;
+        }
+
+        protected override void SetView()
+        {
+            m_action(m_dateTime);
+        }
+
+        protected override void SetNext()
+        {
+            TimeSpan timeSpan;
+
+            if (m_popular == Popular.Day)
+            {
+                timeSpan = new TimeSpan(-1, 0, 0, 0);
+            }
+            else if (m_popular == Popular.Week)
+            {
+                timeSpan = new TimeSpan(-7, 0, 0, 0);
+            }
+            else
+            {
+                timeSpan = new TimeSpan(-31, 0, 0, 0);
+
+            }
+
+            m_dateTime = m_dateTime.Add(timeSpan);
+        }
+    }
+
     sealed class CreateColl
     {
 
-        static async Task GetUris(Http get_content, MyChannels<Task<Uri>> uris)
+        static async Task GetUris(GetWebSiteContent get_content, MyChannels<Task<Uri>> uris)
         {
             while (true)
             {
@@ -337,7 +380,7 @@ namespace yande.re
             }
         }
      
-        static async Task GetImage(Http get_content, MyChannels<Task<Uri>> uris, MyChannels<Task<byte[]>> imgs)
+        static async Task GetImage(GetWebSiteContent get_content, MyChannels<Task<Uri>> uris, MyChannels<Task<byte[]>> imgs)
         {
             while (true)
             {
@@ -359,7 +402,7 @@ namespace yande.re
             }
         }
 
-        static void GetImage(Http get_content, MyChannels<Task<Uri>> uris, MyChannels<Task<byte[]>> imgs, int imgCount)
+        static void GetImage(GetWebSiteContent get_content, MyChannels<Task<Uri>> uris, MyChannels<Task<byte[]>> imgs, int imgCount)
         {
             foreach (var item in Enumerable.Range(0, imgCount))
             {
@@ -367,7 +410,7 @@ namespace yande.re
             }
         }
 
-        public static MyChannels<Task<byte[]>> Create(Http get_content, int uriCount, int imgCount)
+        public static MyChannels<Task<byte[]>> Create(GetWebSiteContent get_content, int uriCount, int imgCount)
         {
             var uris = new MyChannels<Task<Uri>>(uriCount);
 
@@ -604,16 +647,16 @@ namespace yande.re
             }
         }
 
-        void WriteLog(Exception e)
+        static void WriteLog(Exception e)
         {
             string s = System.Environment.NewLine;
 
             File.AppendAllText($"/storage/emulated/0/yande.re.exception.txt", $"{s}{s}{s}{s}{DateTime.Now}{s}{e}", System.Text.Encoding.UTF8);
         }
 
-        void ChangeInputVisible(Http.Popular popular)
+        void ChangeInputVisible(GetWebSiteContent.Popular popular)
         {
-            if (popular == Http.Popular.Pages)
+            if (popular == GetWebSiteContent.Popular.Pages)
             {
                 m_datetime_value_father.IsVisible = false;
 
@@ -665,7 +708,7 @@ namespace yande.re
 
         void InitPopularView()
         {
-            var vs = Enum.GetNames(typeof(Http.Popular));
+            var vs = Enum.GetNames(typeof(GetWebSiteContent.Popular));
 
             string popular = InputData.Popular;
 
@@ -682,7 +725,7 @@ namespace yande.re
 
         void InitSelectView()
         {
-            var vs = Enum.GetNames(typeof(Http.WebSite));
+            var vs = Enum.GetNames(typeof(GetWebSiteContent.WebSite));
 
             string host = InputData.Host;
 
@@ -775,7 +818,7 @@ namespace yande.re
 
                     await Task.Delay(timeSpan * 1000);
                 }
-                catch(MHttpClientException)
+                catch(MHttpClientException e) when (e.InnerException.GetType() == typeof(MHttpException))
                 {
 
                 }
@@ -787,29 +830,10 @@ namespace yande.re
         }
 
 
-        void Start(Http.WebSite webSite, Http.Popular popular, object obj)
+        void Start(GetWebSiteContent get)
         {
-            Action<object> action;
 
-            if (popular != Http.Popular.Pages)
-            {
-                action = (d) => MainThread.BeginInvokeOnMainThread(() => SetDateTime((DateTime)d));
-            }
-            else
-            {
-                action = (n) => MainThread.BeginInvokeOnMainThread(() => SetPages((int)n));
-            }
-            
-
-            var http = new Http(
-                webSite,
-                popular,
-                obj,
-                action,
-                new TimeSpan(0, 0, InputData.TimeOut),
-                InputData.MaxSize, InputData.ImgCount);
-
-            var imgs = CreateColl.Create(http, URI_LOAD_COUNT, InputData.ImgCount);
+            var imgs = CreateColl.Create(get, URI_LOAD_COUNT, InputData.ImgCount);
 
 
             int timeSpan = InputData.TimeSpan;
@@ -830,9 +854,9 @@ namespace yande.re
 
                 Task t = DisplayAlert("消息", "Delete 完成", "确定");
             }
-            catch
+            catch(Exception ex)
             {
-                Task t = DisplayAlert("错误", "Delete error", "确定");
+                Task t = DisplayAlert("错误", $"{ex.GetType()} {ex.Message}", "确定");
             }
             finally
             {
@@ -855,17 +879,23 @@ namespace yande.re
 
             Directory.CreateDirectory(ROOT_PATH);
 
-            var webSize = (Http.WebSite)Enum.Parse(typeof(Http.WebSite), InputData.Host);
+            var webSite = (GetWebSiteContent.WebSite)Enum.Parse(typeof(GetWebSiteContent.WebSite), InputData.Host);
 
-            var p = (Http.Popular)Enum.Parse(typeof(Http.Popular), InputData.Popular);
+            var p = (GetWebSiteContent.Popular)Enum.Parse(typeof(GetWebSiteContent.Popular), InputData.Popular);
 
-            if(p == Http.Popular.Pages)
+            if(p == GetWebSiteContent.Popular.Pages)
             {
                 int n = InputData.Pages;
 
                 SetPages(n);
 
-                Start(webSize, p, n);
+                Start(new GetPagesContent(
+                    webSite,
+                    n,
+                    (v) => MainThread.BeginInvokeOnMainThread(() => SetPages(v)),
+                    new TimeSpan(0, 0, InputData.TimeOut),
+                    InputData.MaxSize,
+                    InputData.ImgCount));
             }
             else
             {
@@ -873,7 +903,14 @@ namespace yande.re
 
                 SetDateTime(dateTime);
 
-                Start(webSize, p, dateTime);
+                Start(new GetDateTimeContent(
+                    webSite,
+                    p,
+                    dateTime,
+                    (d) => MainThread.BeginInvokeOnMainThread(() => SetDateTime(d)),
+                    new TimeSpan(0, 0, InputData.TimeOut),
+                    InputData.MaxSize,
+                    InputData.ImgCount));
             }
 
         }
@@ -902,7 +939,7 @@ namespace yande.re
 
         void OnPopularSelect(object sender, EventArgs e)
         {
-            ChangeInputVisible((Http.Popular)Enum.Parse(typeof(Http.Popular), m_popular_value.SelectedItem.ToString()));
+            ChangeInputVisible((GetWebSiteContent.Popular)Enum.Parse(typeof(GetWebSiteContent.Popular), m_popular_value.SelectedItem.ToString()));
         }
     }
 }
