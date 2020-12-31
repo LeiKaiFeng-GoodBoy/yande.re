@@ -233,10 +233,11 @@ namespace yande.re
 
         readonly Action<int> m_action;
 
-
+        readonly string m_tag;
 
         public GetPagesContent(
             WebSite webSite,
+            string tag,
             int pages,
             Action<int> action,
             TimeSpan timeOut,
@@ -250,12 +251,25 @@ namespace yande.re
             m_pages = pages;
 
             m_action = action;
+
+            m_tag = tag.Trim();
         }
 
         protected override string GetUriPath()
         {
-            
-            return $"/post?page={m_pages}";
+
+            if (string.IsNullOrWhiteSpace(m_tag))
+            {
+
+                return $"/post?page={m_pages}";
+
+            }
+            else
+            {
+
+                return $"/post?page={m_pages}&tags={m_tag}";
+
+            }
 
         }
 
@@ -360,6 +374,9 @@ namespace yande.re
 
         static async Task GetUris(GetWebSiteContent get_content, MyChannels<Task<Uri>> uris)
         {
+
+            int n = 0;
+            
             while (true)
             {
                 try
@@ -367,10 +384,25 @@ namespace yande.re
 
                     var list = await get_content.GetUrisAsync().ConfigureAwait(false);
 
-                    foreach (var item in list)
+                    if (list.Count != 0)
                     {
-                        await uris.WriteAsync(Task.FromResult(item)).ConfigureAwait(false);
+                        n = 0;
+
+                        foreach (var item in list)
+                        {
+                            await uris.WriteAsync(Task.FromResult(item)).ConfigureAwait(false);
+                        }
                     }
+                    else
+                    {
+                        n++;
+
+                        if (n >= 3)
+                        {
+                            return;
+                        }
+                    }
+                    
                 }
                 catch(Exception e)
                 {
@@ -446,7 +478,13 @@ namespace yande.re
 
     static class InputData
     {
-     
+
+        public static string Tag
+        {
+            get => Preferences.Get(nameof(Tag), string.Empty);
+            set => Preferences.Set(nameof(Tag), value);
+        }
+
         public static int Pages
         {
             get => Preferences.Get(nameof(Pages), 1);
@@ -513,7 +551,7 @@ namespace yande.re
         }
 
 
-        public static bool Create(string timeSpan, string timeOut, string maxSize, string imgCount, string pages, string host, string populat)
+        public static bool Create(string tag, string timeSpan, string timeOut, string maxSize, string imgCount, string pages, string host, string populat)
         {
             
             try
@@ -532,6 +570,8 @@ namespace yande.re
                 Host = host;
 
                 Popular = populat;
+
+                Tag = tag;
 
                 return true;
             }
@@ -672,6 +712,8 @@ namespace yande.re
 
         void SetInput()
         {
+            m_tag_value.Text = InputData.Tag;
+
             m_pages_value.Text = InputData.Pages.ToString();
 
             m_datetime_value.Date = InputData.DateTime;
@@ -687,7 +729,7 @@ namespace yande.re
 
         bool CreateInput()
         {
-            return InputData.Create(m_timespan_value.Text, m_timeout_value.Text, m_maxsize_value.Text, m_imgcount_value.Text, m_pages_value.Text, m_select_value.SelectedItem.ToString(), m_popular_value.SelectedItem.ToString());
+            return InputData.Create(m_tag_value.Text, m_timespan_value.Text, m_timeout_value.Text, m_maxsize_value.Text, m_imgcount_value.Text, m_pages_value.Text, m_select_value.SelectedItem.ToString(), m_popular_value.SelectedItem.ToString());
         }
 
         void SetDateTime(DateTime dateTime)
@@ -698,6 +740,7 @@ namespace yande.re
             InputData.DateTime = dateTime;
 
         }
+
 
         void SetPages(int n)
         {
@@ -889,10 +932,13 @@ namespace yande.re
             {
                 int n = InputData.Pages;
 
+                string tag = InputData.Tag;
+
                 SetPages(n);
 
                 Start(new GetPagesContent(
                     webSite,
+                    tag,
                     n,
                     (v) => MainThread.BeginInvokeOnMainThread(() => SetPages(v)),
                     new TimeSpan(0, 0, InputData.TimeOut),
