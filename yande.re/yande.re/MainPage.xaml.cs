@@ -818,7 +818,9 @@ namespace yande.re
 
                     await Task.Delay(timeSpan * 1000);
                 }
-                catch(MHttpClientException e) when (e.InnerException.GetType() == typeof(MHttpException))
+                catch(MHttpClientException e) 
+                when (e.InnerException.GetType() == typeof(MHttpException) ||
+                       e.InnerException.GetType() == typeof(IOException))
                 {
 
                 }
