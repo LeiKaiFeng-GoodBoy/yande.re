@@ -223,13 +223,13 @@ namespace yande.re
 
         readonly Uri m_host;
 
-        
+        readonly TimeSpan m_timeSpan;
 
         public GetWebSiteContent(WebSite webSite, TimeSpan timeOut, int maxSize, int poolCount)
         {
             m_request = GetHttpClient(webSite, maxSize, poolCount, out m_host);
 
-            m_request.ResponseTimeOut = timeOut;
+            m_timeSpan = timeOut;
         }
 
         protected abstract void SetView();
@@ -299,12 +299,85 @@ namespace yande.re
         }
 
 
-        public Task<byte[]> GetImageBytesAsync(Uri uri)
+        public Func<CancellationToken, Task<byte[]>> GetImageBytesAsync(Uri uri)
         {
-            return m_request.GetByteArrayAsync(uri, CancellationToken.None);
+            Func<CancellationToken, Task<byte[]>> func;
+
+            func = (tokan) => m_request.GetByteArrayAsync(uri, tokan);
+
+            return TimeOutReSetAsync(func, m_timeSpan);
         }
 
-        public Func<Task<List<Uri>>> GetUrisFunc()
+        public static Func<CancellationToken, Task<List<Uri>>> IsOverAsync(Func<CancellationToken, Task<List<Uri>>> func)
+        {
+            return async (tokan) =>
+            {
+                int n = 0;
+
+                while (true)
+                {
+                    var list = await func(tokan).ConfigureAwait(false);
+
+                    if (list.Count == 0)
+                    {
+                        n++;
+
+                        if (n >= 3)
+                        {
+                            throw new ChannelClosedException();
+                        }
+                    }
+                    else
+                    {
+                        return list;
+                    }
+                }
+            };
+        }
+
+        public static Func<CancellationToken, Task<T>> TimeOutReSetAsync<T>(Func<CancellationToken, Task<T>> func, TimeSpan timeSpan)
+        {
+
+            var timeOut = timeSpan;
+
+            return async (tokan) =>
+            {
+                while (true)
+                {
+                    using (var source = new CancellationTokenSource(timeOut))
+                    using (tokan.Register(source.Cancel))
+                    {
+                        try
+                        {
+                            return await func(source.Token).ConfigureAwait(false);
+                        }
+                        catch (MHttpClientException e)
+                        {
+                            if (tokan.IsCancellationRequested)
+                            {
+                                throw;
+                            }
+                            else
+                            {
+                                if (e.InnerException is OperationCanceledException)
+                                {
+                                    timeOut += timeSpan;
+                                }
+                                else
+                                {
+                                    throw;
+                                }
+                            }
+                            
+                        }
+                    }
+                }
+            };
+
+            
+        }
+
+        public Func<CancellationToken, Task<List<Uri>>> GetUrisFunc()
         {
             
             Uri uri = GetUri();
@@ -313,14 +386,16 @@ namespace yande.re
 
             SetNext();
 
-            return async () =>
+            Func<CancellationToken, Task<List<Uri>>> func = async (tokan) =>
             {
-                string html = await m_request.GetStringAsync(uri, CancellationToken.None).ConfigureAwait(false);
+                string html = await m_request.GetStringAsync(uri, tokan).ConfigureAwait(false);
 
                 return ParseUris(html);
             };
 
-            
+            func = TimeOutReSetAsync(func, m_timeSpan);
+
+            return IsOverAsync(func);
         }
 
     }
@@ -471,14 +546,26 @@ namespace yande.re
     sealed class PreLoad
     {
 
-        static async Task GetUrisTask(Func<Task<List<Uri>>> getContent, ChannelWriter<Uri> uris)
+        static async Task GetUrisTask(GetWebSiteContent getContent, ChannelWriter<Uri> uris, CancellationToken cancellationToken)
         {
 
             try
             {
                 while (true)
                 {
-                    var list = await getContent().ConfigureAwait(false);
+                    var func = getContent.GetUrisFunc();
+
+                    List<Uri> list;
+                    try
+                    {
+
+                        list = await func(cancellationToken).ConfigureAwait(false);
+
+                    }
+                    catch (MHttpClientException)
+                    {
+                        continue;
+                    }
 
                     foreach (var item in list)
                     {
@@ -493,7 +580,7 @@ namespace yande.re
 
         }
 
-        static async Task GetImageTask(Func<Uri, Task<byte[]>> getContent, ChannelReader<Uri> uris, ChannelWriter<byte[]> imgs)
+        static async Task GetImageTask(GetWebSiteContent getContent, ChannelReader<Uri> uris, ChannelWriter<byte[]> imgs, CancellationToken cancellationToken)
         {
             try
             {
@@ -502,11 +589,13 @@ namespace yande.re
                     Uri uri = await uris.ReadAsync().ConfigureAwait(false);
 
 
+                    var func = getContent.GetImageBytesAsync(uri);
+
                     byte[] buffer;
 
                     try
                     {
-                        buffer = await getContent(uri).ConfigureAwait(false);
+                        buffer = await func(cancellationToken).ConfigureAwait(false);
                     }
                     catch (MHttpClientException)
                     {
@@ -522,72 +611,6 @@ namespace yande.re
             }
         }
 
-        static Func<Uri, Task<byte[]>> CreateBytesFunc(Func<Uri, Task<byte[]>> getContent)
-        {
-            return async (uri) =>
-            {
-                while (true)
-                {
-                    try
-                    {
-                        return await getContent(uri).ConfigureAwait(false);
-                    }
-                    catch (MHttpClientException e)
-                    {
-                        if (e.InnerException is OperationCanceledException ||
-                            e.InnerException is IOException ||
-                            e.InnerException is SocketException)
-                        {
-
-                        }
-                        else
-                        {
-                            throw;
-                        }
-                    }
-
-                }
-            };
-        }
-
-        static Func<Task<List<Uri>>> CreateReturnFunc(Func<Func<Task<List<Uri>>>> getContent)
-        {
-            int n = 0;
-
-            return async () =>
-            {
-                while (true)
-                {
-                    try
-                    {
-                        var taskFunc = getContent();
-
-                        var list = await taskFunc().ConfigureAwait(false);
-
-                        if (list.Count == 0)
-                        {
-                            n++;
-                          
-                            if (n >= 3)
-                            {
-                                throw new ChannelClosedException();
-                            }
-                        }
-                        else
-                        {
-                            n = 0;
-
-                            return list;
-                        }
-                    }
-                    catch (MHttpClientException)
-                    {
-
-                    }
-                }
-            };
-        }
-
         public static PreLoad Create(GetWebSiteContent get_content, int uriCount, int imgCount)
         {
             
@@ -595,8 +618,10 @@ namespace yande.re
 
             var imgs = Channel.CreateBounded<byte[]>(imgCount);
 
+            var cancelSource = new CancellationTokenSource();
 
-            var t1 = Task.Run(() => GetUrisTask(CreateReturnFunc(get_content.GetUrisFunc), uris));
+
+            var t1 = Task.Run(() => GetUrisTask(get_content, uris, cancelSource.Token));
 
             t1.ContinueWith((t) => uris.Writer.TryComplete());
 
@@ -608,7 +633,7 @@ namespace yande.re
 
             foreach (var item in Enumerable.Range(0, imgCount))
             {
-                list.Add(Task.Run(() => GetImageTask(get_content.GetImageBytesAsync, uris, imgs)));
+                list.Add(Task.Run(() => GetImageTask(get_content, uris, imgs, cancelSource.Token)));
             }
 
             var t2 = Task.WhenAll(list.ToArray());
@@ -622,8 +647,7 @@ namespace yande.re
 
             var v = new PreLoad();
 
-            var source = new CancellationTokenSource();
-
+            
             v.CancelAction = () =>
             {
 
@@ -632,10 +656,10 @@ namespace yande.re
                 imgs.Writer.TryComplete();
 
 
-                source.Cancel();
+                cancelSource.Cancel();
             };
 
-            v.ReadFunc = () => Task.Run(() => imgs.Reader.ReadAsync(source.Token).AsTask());
+            v.ReadFunc = () => Task.Run(() => imgs.Reader.ReadAsync(cancelSource.Token).AsTask());
 
             return v;
         }
@@ -1209,6 +1233,9 @@ namespace yande.re
                         m_cons.IsVisible = true;
 
                         m_viewCons.IsVisible = false;
+
+                        SetInput();
+
                     });
 
                 });
