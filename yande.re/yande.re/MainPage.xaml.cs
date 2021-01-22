@@ -11,9 +11,46 @@ using System.Net.Sockets;
 using System.Linq;
 using System.Security.Cryptography;
 using LeiKaiFeng.Http;
+using System.Threading.Channels;
+using System.Threading;
 
 namespace yande.re
 {
+
+    static class Log
+    {
+        static readonly object s_lock = new object();
+
+        static void Write_(string name, object obj)
+        {
+            lock (s_lock)
+            {
+                string s = System.Environment.NewLine;
+
+                File.AppendAllText($"/storage/emulated/0/pixiv.{name}.txt", $"{s}{s}{s}{s}{DateTime.Now}{s}{obj}", System.Text.Encoding.UTF8);
+            }
+        }
+
+        public static void Write(string name, object obj)
+        {
+            Write_(name, obj);
+        }
+
+        public static void Write(string name, Task task)
+        {
+            task.ContinueWith((t) =>
+            {
+                try
+                {
+                    t.Wait();
+                }
+                catch (Exception e)
+                {
+                    Log.Write(name, e);
+                }
+            });
+        }
+    }
 
     sealed class DeleteRepeatFile
     {
@@ -205,23 +242,26 @@ namespace yande.re
 
         public Task<byte[]> GetImageBytesAsync(Uri uri)
         {
-            return m_request.GetByteArrayAsync(uri);
+            return m_request.GetByteArrayAsync(uri, CancellationToken.None);
         }
 
-        public async Task<List<Uri>> GetUrisAsync()
+        public Func<Task<List<Uri>>> GetUrisFunc()
         {
             
             Uri uri = GetUri();
-
-            
-            string html = await m_request.GetStringAsync(uri).ConfigureAwait(false);
 
             SetView();
 
             SetNext();
 
+            return async () =>
+            {
+                string html = await m_request.GetStringAsync(uri, CancellationToken.None).ConfigureAwait(false);
 
-            return ParseUris(html);
+                return ParseUris(html);
+            };
+
+            
         }
 
     }
@@ -369,95 +409,197 @@ namespace yande.re
         }
     }
 
-    sealed class CreateColl
+    sealed class PreLoad
     {
 
-        static async Task GetUris(GetWebSiteContent get_content, MyChannels<Task<Uri>> uris)
+        static async Task GetUrisTask(Func<Task<List<Uri>>> getContent, ChannelWriter<Uri> uris)
         {
 
+            try
+            {
+                while (true)
+                {
+                    var list = await getContent().ConfigureAwait(false);
+
+                    foreach (var item in list)
+                    {
+                        await uris.WriteAsync(item).ConfigureAwait(false);
+                    }
+                }
+            }
+            catch (ChannelClosedException)
+            {
+
+            }
+
+        }
+
+        static async Task GetImageTask(Func<Uri, Task<byte[]>> getContent, ChannelReader<Uri> uris, ChannelWriter<byte[]> imgs)
+        {
+            try
+            {
+                while (true)
+                {
+                    Uri uri = await uris.ReadAsync().ConfigureAwait(false);
+
+
+                    byte[] buffer;
+
+                    try
+                    {
+                        buffer = await getContent(uri).ConfigureAwait(false);
+                    }
+                    catch (MHttpClientException)
+                    {
+                        continue;
+                    }
+
+                    await imgs.WriteAsync(buffer).ConfigureAwait(false);
+                }
+            }
+            catch (ChannelClosedException)
+            {
+
+            }
+        }
+
+        static Func<Uri, Task<byte[]>> CreateBytesFunc(Func<Uri, Task<byte[]>> getContent)
+        {
+            return async (uri) =>
+            {
+                while (true)
+                {
+                    try
+                    {
+                        return await getContent(uri).ConfigureAwait(false);
+                    }
+                    catch (MHttpClientException e)
+                    {
+                        if (e.InnerException is OperationCanceledException ||
+                            e.InnerException is IOException ||
+                            e.InnerException is SocketException)
+                        {
+
+                        }
+                        else
+                        {
+                            throw;
+                        }
+                    }
+
+                }
+            };
+        }
+
+        static Func<Task<List<Uri>>> CreateReturnFunc(Func<Func<Task<List<Uri>>>> getContent)
+        {
             int n = 0;
+
+            return async () =>
+            {
+                while (true)
+                {
+                    try
+                    {
+                        var taskFunc = getContent();
+
+                        var list = await taskFunc().ConfigureAwait(false);
+
+                        if (list.Count == 0)
+                        {
+                            n++;
+                          
+                            if (n >= 3)
+                            {
+                                throw new ChannelClosedException();
+                            }
+                        }
+                        else
+                        {
+                            n = 0;
+
+                            return list;
+                        }
+                    }
+                    catch (MHttpClientException)
+                    {
+
+                    }
+                }
+            };
+        }
+
+        public static PreLoad Create(GetWebSiteContent get_content, int uriCount, int imgCount)
+        {
             
-            while (true)
-            {
-                try
-                {
+            var uris = Channel.CreateBounded<Uri>(uriCount);
 
-                    var list = await get_content.GetUrisAsync().ConfigureAwait(false);
-
-                    if (list.Count != 0)
-                    {
-                        n = 0;
-
-                        foreach (var item in list)
-                        {
-                            await uris.WriteAsync(Task.FromResult(item)).ConfigureAwait(false);
-                        }
-                    }
-                    else
-                    {
-                        n++;
-
-                        if (n >= 3)
-                        {
-                            return;
-                        }
-                    }
-                    
-                }
-                catch(Exception e)
-                {
-                    await uris.WriteAsync((Task.FromException<Uri>(e))).ConfigureAwait(false);
-                }
-
-            }
-        }
-     
-        static async Task GetImage(GetWebSiteContent get_content, MyChannels<Task<Uri>> uris, MyChannels<Task<byte[]>> imgs)
-        {
-            while (true)
-            {
-
-                
-                try
-                {
-                    Uri uri = await (await uris.ReadAsync().ConfigureAwait(false)).ConfigureAwait(false);
-
-                    byte[] buffer = await get_content.GetImageBytesAsync(uri).ConfigureAwait(false);
+            var imgs = Channel.CreateBounded<byte[]>(imgCount);
 
 
-                    await imgs.WriteAsync((Task.FromResult(buffer))).ConfigureAwait(false);
-                }
-                catch(Exception e)
-                {
-                    await imgs.WriteAsync((Task.FromException<byte[]>(e))).ConfigureAwait(false);
-                }
-            }
-        }
+            var t1 = Task.Run(() => GetUrisTask(CreateReturnFunc(get_content.GetUrisFunc), uris));
 
-        static void GetImage(GetWebSiteContent get_content, MyChannels<Task<Uri>> uris, MyChannels<Task<byte[]>> imgs, int imgCount)
-        {
+            t1.ContinueWith((t) => uris.Writer.TryComplete());
+
+
+
+
+
+            var list = new List<Task>();
+
             foreach (var item in Enumerable.Range(0, imgCount))
             {
-                Task.Run(() => GetImage(get_content, uris, imgs));
+                list.Add(Task.Run(() => GetImageTask(get_content.GetImageBytesAsync, uris, imgs)));
             }
+
+            var t2 = Task.WhenAll(list.ToArray());
+
+            t2.ContinueWith((t) =>
+            {
+                uris.Writer.TryComplete();
+
+                imgs.Writer.TryComplete();
+            });
+
+            var v = new PreLoad();
+
+            var source = new CancellationTokenSource();
+
+            v.CancelAction = () =>
+            {
+
+                uris.Writer.TryComplete();
+
+                imgs.Writer.TryComplete();
+
+
+                source.Cancel();
+            };
+
+            v.ReadFunc = () => Task.Run(() => imgs.Reader.ReadAsync(source.Token).AsTask());
+
+            return v;
         }
 
-        public static MyChannels<Task<byte[]>> Create(GetWebSiteContent get_content, int uriCount, int imgCount)
+        Action CancelAction { get; set; }
+        
+
+        Func<Task<byte[]>> ReadFunc { get; set; }
+
+        private PreLoad()
         {
-            var uris = new MyChannels<Task<Uri>>(uriCount);
 
-            var imgs = new MyChannels<Task<byte[]>>(imgCount);
-
-
-            Task.Run(() => GetUris(get_content, uris));
-
-
-            Task.Run(() => GetImage(get_content, uris, imgs, imgCount));
-
-            return imgs;
         }
 
+        public Task<byte[]> ReadAsync()
+        {
+            return ReadFunc();
+        }
 
+        public void Cencel()
+        {
+            CancelAction();
+        }
     }
 
     sealed class Data
@@ -648,11 +790,30 @@ namespace yande.re
 
         int m_count;
 
+        Task m_viewTask;
+
+        PreLoad m_preLoad;
+
         public MainPage()
         {
             InitializeComponent();
 
             Task t = InitPermissions();
+        }
+
+        async Task InitPermissions()
+        {
+            var p = await Permissions.RequestAsync<Permissions.StorageWrite>();
+
+            if (p == PermissionStatus.Granted)
+            {
+                Init();
+
+            }
+            else
+            {
+                Task t = DisplayAlert("错误", "需要存储权限", "确定");
+            }
         }
 
         void Init()
@@ -670,28 +831,6 @@ namespace yande.re
 
 
 
-        }
-
-        async Task InitPermissions()
-        {
-            var p = await Permissions.RequestAsync<Permissions.StorageWrite>();
-
-            if (p == PermissionStatus.Granted)
-            {
-                Init();
-                
-            }
-            else
-            {
-                Task t = DisplayAlert("错误", "需要存储权限", "确定");
-            }
-        }
-
-        static void WriteLog(Exception e)
-        {
-            string s = System.Environment.NewLine;
-
-            File.AppendAllText($"/storage/emulated/0/yande.re.exception.txt", $"{s}{s}{s}{s}{DateTime.Now}{s}{e}", System.Text.Encoding.UTF8);
         }
 
         void ChangeInputVisible(GetWebSiteContent.Popular popular)
@@ -781,7 +920,70 @@ namespace yande.re
             m_select_value.SelectedIndex = index;
         }
 
-        
+
+
+        void OnCollectionViewSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (m_view.SelectedItem != null)
+            {
+
+                Task t = SaveImage(((Data)m_view.SelectedItem).Buffer);
+
+                m_view.SelectedItem = null;
+            }
+        }
+
+        void SetViewImageSource()
+        {
+
+            m_view.ItemsSource = m_source;
+
+
+        }
+
+
+        void OnResetDateTime(object sender, EventArgs e)
+        {
+            m_datetime_value.Date = DateTime.Today;
+        }
+
+        void OnPopularSelect(object sender, EventArgs e)
+        {
+            ChangeInputVisible((GetWebSiteContent.Popular)Enum.Parse(typeof(GetWebSiteContent.Popular), m_popular_value.SelectedItem.ToString()));
+        }
+
+
+        void OnScrolled(object sender, ItemsViewScrolledEventArgs e)
+        {
+            long n = (long)e.VerticalDelta;
+
+            if (n != 0)
+            {
+                if (n < 0)
+                {
+                    m_awa.SetAwait();
+                }
+                else if (n > 0 && e.LastVisibleItemIndex + 1 == m_source.Count)
+                {
+                    m_awa.SetAdd();
+                }
+            }
+        }
+
+
+        static async Task SaveImage(byte[] buffer)
+        {
+            string name = Path.Combine(ROOT_PATH, Path.GetRandomFileName() + ".png");
+
+            using (var file = new FileStream(name, FileMode.Create, FileAccess.Write, FileShare.None, 1, true))
+            {
+
+                await file.WriteAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
+            }
+        }
+
+
+
 
         async Task SetImage(byte[] buffer)
         {
@@ -799,13 +1001,13 @@ namespace yande.re
                 {
                     m_source.RemoveAt(0);
 
-                    
+
                 }
 
                 await Task.Yield();
             }
-            
-            
+
+
 
             m_source.Add(new Data(buffer));
 
@@ -816,99 +1018,46 @@ namespace yande.re
             await Task.Yield();
         }
 
-        static async Task SaveImage(byte[] buffer)
-        {
-            string name = Path.Combine(ROOT_PATH, Path.GetRandomFileName() + ".png");
 
-            using (var file = new FileStream(name, FileMode.Create, FileAccess.Write, FileShare.None, 4096, true))
+        async Task While(PreLoad preLoad, int timeSpan)
+        {
+            try
             {
-
-                await file.WriteAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
-            }
-        }
-
-
-        void OnCollectionViewSelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if(m_view.SelectedItem != null)
-            {
-                
-                Task t = SaveImage(((Data)m_view.SelectedItem).Buffer);
-
-                m_view.SelectedItem = null;
-            }
-        }
-
-        void SetViewImageSource()
-        {
-            
-            m_view.ItemsSource = m_source;
-
-            
-        }
-
-        async Task While(MyChannels<Task<byte[]>> imgs, int timeSpan)
-        {
-            while (true)
-            {
-                try
+                while (true)
                 {
                     await m_awa.Get();
 
-                    var item = await await imgs.ReadAsync();
+                    var item = await preLoad.ReadAsync();
 
                     await SetImage(item);
 
                     await Task.Delay(timeSpan * 1000);
                 }
-                catch(MHttpClientException e) 
-                when (e.InnerException.GetType() == typeof(MHttpException) ||
-                       e.InnerException.GetType() == typeof(IOException))
-                {
-
-                }
-                catch (Exception e)
-                {
-                    WriteLog(e);
-                }
             }
+            catch (ChannelClosedException)
+            {
+
+            }
+            catch (OperationCanceledException)
+            {
+
+            }
+
+            
         }
 
 
         void Start(GetWebSiteContent get)
         {
 
-            var imgs = CreateColl.Create(get, URI_LOAD_COUNT, InputData.ImgCount);
+           
+            m_preLoad = PreLoad.Create(get, URI_LOAD_COUNT, InputData.ImgCount);
 
 
-            int timeSpan = InputData.TimeSpan;
+            
+            m_viewTask = While(m_preLoad, InputData.TimeSpan);
 
-            Task t = While(imgs, timeSpan);
-        }
-
-        async void OnDeleteFile(object sender, EventArgs e)
-        {
-            Button button = (Button)sender;
-
-            button.IsEnabled = false;
-
-            try
-            {
-                await Task.Run(() => DeleteRepeatFile.Statr(ROOT_PATH));
-
-
-                Task t = DisplayAlert("消息", "Delete 完成", "确定");
-            }
-            catch(Exception ex)
-            {
-                Task t = DisplayAlert("错误", $"{ex.GetType()} {ex.Message}", "确定");
-            }
-            finally
-            {
-
-                button.IsEnabled = true;
-
-            }
+            Log.Write("viewTask", m_viewTask);
         }
 
         void OnStart(object sender, EventArgs e)
@@ -921,6 +1070,8 @@ namespace yande.re
             }
 
             m_cons.IsVisible = false;
+
+            m_viewCons.IsVisible = true;
 
             Directory.CreateDirectory(ROOT_PATH);
 
@@ -963,31 +1114,44 @@ namespace yande.re
 
         }
 
-        void OnScrolled(object sender, ItemsViewScrolledEventArgs e)
+        protected override bool OnBackButtonPressed()
         {
-            long n = (long)e.VerticalDelta;
-
-            if (n != 0)
+            if (m_preLoad is null || m_viewTask is null)
             {
-                if (n < 0)
-                {
-                    m_awa.SetAwait();
-                }
-                else if (n > 0 && e.LastVisibleItemIndex + 1 == m_source.Count)
-                {
-                    m_awa.SetAdd();
-                }
+
             }
+            else
+            {
+                var t = m_viewTask;
+
+                m_viewTask = null;
+
+                var p = m_preLoad;
+
+                m_preLoad = null;
+
+
+                t.ContinueWith((tt) =>
+                {
+                    MainThread.BeginInvokeOnMainThread(() =>
+                    {
+
+                        m_source.Clear();
+
+                        m_cons.IsVisible = true;
+
+                        m_viewCons.IsVisible = false;
+                    });
+
+                });
+
+                p.Cencel();
+
+                DisplayAlert("消息", "正在取消", "确定");
+            }
+
+            return true;
         }
 
-        void OnResetDateTime(object sender, EventArgs e)
-        {
-            m_datetime_value.Date = DateTime.Today;
-        }
-
-        void OnPopularSelect(object sender, EventArgs e)
-        {
-            ChangeInputVisible((GetWebSiteContent.Popular)Enum.Parse(typeof(GetWebSiteContent.Popular), m_popular_value.SelectedItem.ToString()));
-        }
     }
 }
