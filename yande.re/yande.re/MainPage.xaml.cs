@@ -13,6 +13,8 @@ using System.Security.Cryptography;
 using LeiKaiFeng.Http;
 using System.Threading.Channels;
 using System.Threading;
+using System.Xml.Serialization;
+using System.Text;
 
 namespace yande.re
 {
@@ -114,8 +116,90 @@ namespace yande.re
         }
     }
 
+
+    [Serializable]
+    public sealed class WebInfo
+    {
+        public string Key { get; set; }
+
+
+        public string DnsHost { get; set; }
+
+
+        public string SniHost { get; set; }
+
+        public string HostHost { get; set; }
+
+        
+    }
+
+    static class Xml
+    {
+        public static T GetDeserializeXml<T>(string xml)
+        {
+            XmlSerializer serializer = new XmlSerializer(typeof(T));
+
+
+
+            return (T)serializer.Deserialize(new MemoryStream(Encoding.UTF8.GetBytes(xml)));
+
+
+        }
+
+
+        public static string GetSerializeXml<T>(T obj)
+        {
+            XmlSerializer serializer = new XmlSerializer(typeof(T));
+
+
+            MemoryStream memoryStream = new MemoryStream();
+
+
+            serializer.Serialize(memoryStream, obj);
+
+
+
+            return Encoding.UTF8.GetString(memoryStream.GetBuffer(), 0, checked((int)memoryStream.Position));
+        }
+    }
+
+
     abstract class GetWebSiteContent
     {
+
+        const string Konachan_Host = "https://konachan.com";
+
+        const string Yandere_Host = "https://yande.re";
+
+
+        public static string CreateDefInfo()
+        {
+            return Xml.GetSerializeXml(new WebInfo[] {
+
+                new WebInfo
+                {
+                    Key=GetWebSiteContent.WebSite.Konachan.ToString(),
+
+                    DnsHost=new Uri( GetWebSiteContent.Konachan_Host).Host,
+
+                    SniHost=new Uri( GetWebSiteContent.Konachan_Host).Host,
+
+                    HostHost=new Uri( GetWebSiteContent.Konachan_Host).Host
+                },
+
+                new WebInfo
+                {
+                    Key = GetWebSiteContent.WebSite.Yandere.ToString(),
+
+                    DnsHost=new Uri( GetWebSiteContent.Konachan_Host).Host,
+
+                    SniHost=new Uri( GetWebSiteContent.Yandere_Host).Host,
+
+                    HostHost=new Uri( GetWebSiteContent.Yandere_Host).Host
+                }
+            });
+        }
+
         public enum WebSite
         {
             Konachan,
@@ -133,10 +217,6 @@ namespace yande.re
             Month
         }
 
-        const string Konachan_Host = "https://konachan.com";
-
-        const string Yandere_Host = "https://yande.re";
-
         readonly Regex m_regex = new Regex(@"<a class=""directlink (?:largeimg|smallimg)"" href=""([^""]+)""");
 
         readonly MHttpClient m_request;
@@ -147,33 +227,35 @@ namespace yande.re
 
         public GetWebSiteContent(WebSite webSite, TimeSpan timeOut, int maxSize, int poolCount)
         {
-            m_request = GetHttpClient(webSite, maxSize, poolCount);
+            m_request = GetHttpClient(webSite, maxSize, poolCount, out m_host);
 
             m_request.ResponseTimeOut = timeOut;
-
-            m_host = GetHost(webSite);
-
         }
 
         protected abstract void SetView();
 
         protected abstract void SetNext();
 
-        static Task CreateConnectAsync(Socket socket, Uri uri)
+
+        static void SetWebInfo(WebInfo webInfo, MHttpClientHandler handler, out Uri host)
         {
-            return socket.ConnectAsync(new Uri(Konachan_Host).Host, 443);
+            handler.ConnectCallback = (socket, uri) => socket.ConnectAsync(webInfo.DnsHost, 443);
+
+
+            handler.AuthenticateCallback = async (stream, uri) =>
+            {
+                SslStream sslStream = new SslStream(stream, false);
+
+                await sslStream.AuthenticateAsClientAsync(webInfo.SniHost).ConfigureAwait(false);
+
+                return sslStream;
+            };
+
+
+            host = new Uri($"https://{webInfo.HostHost}/");
         }
 
-        static async Task<Stream> CreateAuthenticateAsync(Stream stream, Uri uri)
-        {
-            SslStream sslStream = new SslStream(stream, false);
-
-            await sslStream.AuthenticateAsClientAsync(uri.Host).ConfigureAwait(false);
-
-            return sslStream;
-        }
-
-        static MHttpClient GetHttpClient(WebSite webSite, int maxSize, int poolCount)
+        static MHttpClient GetHttpClient(WebSite webSite, int maxSize, int poolCount, out Uri host)
         {
            
             var handler = new MHttpClientHandler
@@ -184,37 +266,14 @@ namespace yande.re
                 MaxStreamPoolCount = checked(poolCount * 2)
             };
 
-
-
-            if (webSite != WebSite.Yandere)
-            {
-                return new MHttpClient(handler);
-            }
-            else
-            {
-                handler.ConnectCallback = CreateConnectAsync;
-
-                handler.AuthenticateCallback = CreateAuthenticateAsync;
-
-
-                return new MHttpClient(handler);
-            }
-        }
-
-        static Uri GetHost(WebSite webSite)
-        {
-            if(webSite == WebSite.Yandere)
-            {
-                return new Uri(Yandere_Host);
-            }
-            else
-            {
-                return new Uri(Konachan_Host);
-            }
+            var v = Xml.GetDeserializeXml<WebInfo[]>(InputData.WebInfo);
             
-             
-        }
+            var wv = v.Where((item) => item.Key == webSite.ToString()).First();
+            
+            SetWebInfo(wv, handler, out host);
 
+            return new MHttpClient(handler);
+        }
 
         Uri GetUri()
         {
@@ -621,6 +680,12 @@ namespace yande.re
     static class InputData
     {
 
+        public static string WebInfo
+        {
+            get => Preferences.Get(nameof(WebInfo), GetWebSiteContent.CreateDefInfo());
+            set => Preferences.Set(nameof(WebInfo), value);
+        }
+
         public static string Tag
         {
             get => Preferences.Get(nameof(Tag), string.Empty);
@@ -824,7 +889,10 @@ namespace yande.re
 
             InitPopularView();
 
+            InitChangeWebInfoSelectView();
+
             SetInput();
+
 
 
             SetViewImageSource();
@@ -1153,5 +1221,86 @@ namespace yande.re
             return true;
         }
 
+        void OnNotViewWebInfo(object sender, EventArgs e)
+        {
+            m_inputInfo.IsVisible = false;
+
+            m_cons.IsVisible = true;
+        }
+
+        void InitChangeWebInfoSelectView()
+        {
+            var vs = Enum.GetNames(typeof(GetWebSiteContent.WebSite));
+
+            m_web_info_select_value.ItemsSource = vs;
+
+            m_web_info_select_value.SelectedIndex = 0;
+
+            OnChangeWebInfoSelect(m_web_info_select_value, EventArgs.Empty);
+        }
+
+        void OnChangeWebInfoSelect(object sender, EventArgs e)
+        {
+            var v = Xml.GetDeserializeXml<WebInfo[]>(InputData.WebInfo);
+
+            string s = m_web_info_select_value.SelectedItem.ToString();
+
+
+            SetWebInfoValue(v.Where((item) => item.Key == s).First());
+        }
+
+
+        void SetWebInfoValue(WebInfo webInfo)
+        {
+            m_dns_host_value.Text = webInfo.DnsHost;
+
+            m_sni_host_value.Text = webInfo.SniHost;
+
+            m_host_host_value.Text = webInfo.HostHost;
+        }
+
+        void OnChangeWebInfo(object sender, EventArgs e)
+        {
+
+
+
+            try
+            {
+                var v = Xml.GetDeserializeXml<WebInfo[]>(InputData.WebInfo);
+
+                string s = m_web_info_select_value.SelectedItem.ToString();
+
+
+                GetWebInfoValue(v.Where((item) => item.Key == s).First());
+
+
+                InputData.WebInfo = Xml.GetSerializeXml(v);
+
+                DisplayAlert("消息", "更改成功", "确定");
+            }
+            catch (FormatException)
+            {
+                DisplayAlert("错误", "uri格式不正确", "确定");
+            }
+        }
+
+
+        static string AsValue(string s)
+        {
+            s = s ?? "";
+
+            s = s.Trim();
+
+            return new Uri($"https://{s}/").Host;
+        }
+
+        void GetWebInfoValue(WebInfo webInfo)
+        {
+            webInfo.DnsHost = AsValue(m_dns_host_value.Text);
+
+            webInfo.SniHost = AsValue(m_sni_host_value.Text);
+
+            webInfo.HostHost = AsValue(m_host_host_value.Text);
+        }
     }
 }
