@@ -32,22 +32,36 @@
         </StackLayout>
         <StackLayout x:Name="m_cons"
                      IsVisible="false">
-            <StackLayout x:Name="m_datetime_value_father">
+            <StackLayout x:Name="m_datetime_value_father"
+                         Orientation="Horizontal">
+                <Label Text="选择日期"></Label>
                 <DatePicker x:Name="m_datetime_value"></DatePicker>
             </StackLayout>
             <StackLayout x:Name="m_pages_value_father">
-                <Entry x:Name="m_pages_value"
+                <StackLayout Orientation="Horizontal">
+                    <Label Text="选择页"></Label>
+                    <Entry x:Name="m_pages_value"
                        WidthRequest="200"
-                       Keyboard="Numeric"></Entry>
-                <Entry x:Name="m_tag_value"
+                       Keyboard="Numeric"></Entry>    
+                </StackLayout>
+                <StackLayout Orientation="Horizontal">
+                    <Label Text="选择Tag"></Label>
+                    <Entry x:Name="m_tag_value"
                        WidthRequest="200"
                        Keyboard="Text"></Entry>
+                </StackLayout>
             </StackLayout>
-            <Picker x:Name="m_select_value"></Picker>
-            <Picker x:Name="m_popular_value" 
-                    SelectedIndexChanged="OnPopularSelect"></Picker>
-            <Button Clicked="OnResetDateTime" Text="ResetDateTime"></Button>
-            <Button Clicked="OnStart" Text="Start"></Button>
+            <StackLayout Orientation="Horizontal">
+                <Label Text="选择网站"></Label>
+                <Picker x:Name="m_select_value"></Picker>    
+            </StackLayout>
+            <StackLayout Orientation="Horizontal">
+                <Label Text="选择模式"></Label>
+                <Picker x:Name="m_popular_value" 
+                    SelectedIndexChanged="OnPopularSelect"></Picker>    
+            </StackLayout>
+            <Button Clicked="OnResetDateTime" Text="重设日期"></Button>
+            <Button Clicked="OnStart" Text="开始"></Button>
             <StackLayout Orientation="Horizontal">
                 <Label Text="TimeSpan"></Label>
                 <Entry x:Name="m_timespan_value"

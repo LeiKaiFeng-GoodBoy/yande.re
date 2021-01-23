@@ -308,14 +308,17 @@ namespace yande.re
             return TimeOutReSetAsync(func, m_timeSpan);
         }
 
-        public static Func<CancellationToken, Task<List<Uri>>> IsOverAsync(Func<CancellationToken, Task<List<Uri>>> func)
+        public Func<CancellationToken, Task<List<Uri>>> GetContentFunc()
         {
+            int n = 0;
+
             return async (tokan) =>
             {
-                int n = 0;
-
+                
                 while (true)
                 {
+                    var func = GetUrisFunc();
+
                     var list = await func(tokan).ConfigureAwait(false);
 
                     if (list.Count == 0)
@@ -329,19 +332,22 @@ namespace yande.re
                     }
                     else
                     {
+                        n = 0;
+
                         return list;
                     }
                 }
             };
         }
 
-        public static Func<CancellationToken, Task<T>> TimeOutReSetAsync<T>(Func<CancellationToken, Task<T>> func, TimeSpan timeSpan)
+        static Func<CancellationToken, Task<T>> TimeOutReSetAsync<T>(Func<CancellationToken, Task<T>> func, TimeSpan timeSpan)
         {
 
-            var timeOut = timeSpan;
-
+            
             return async (tokan) =>
             {
+                var timeOut = timeSpan;
+
                 while (true)
                 {
                     using (var source = new CancellationTokenSource(timeOut))
@@ -377,7 +383,7 @@ namespace yande.re
             
         }
 
-        public Func<CancellationToken, Task<List<Uri>>> GetUrisFunc()
+        Func<CancellationToken, Task<List<Uri>>> GetUrisFunc()
         {
             
             Uri uri = GetUri();
@@ -393,9 +399,7 @@ namespace yande.re
                 return ParseUris(html);
             };
 
-            func = TimeOutReSetAsync(func, m_timeSpan);
-
-            return IsOverAsync(func);
+            return TimeOutReSetAsync(func, m_timeSpan);
         }
 
     }
@@ -548,13 +552,14 @@ namespace yande.re
 
         static async Task GetUrisTask(GetWebSiteContent getContent, ChannelWriter<Uri> uris, CancellationToken cancellationToken)
         {
+            var func = getContent.GetContentFunc();
 
             try
             {
+                
                 while (true)
                 {
-                    var func = getContent.GetUrisFunc();
-
+                    
                     List<Uri> list;
                     try
                     {
