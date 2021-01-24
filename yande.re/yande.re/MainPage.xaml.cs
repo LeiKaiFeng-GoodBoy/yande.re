@@ -239,7 +239,7 @@ namespace yande.re
 
         static void SetWebInfo(WebInfo webInfo, MHttpClientHandler handler, out Uri host)
         {
-            handler.ConnectCallback = (socket, uri) => socket.ConnectAsync(webInfo.DnsHost, 443);
+            handler.ConnectCallback = (socket, uri) => Task.Run(() => socket.Connect(webInfo.DnsHost, 443));
 
 
             handler.AuthenticateCallback = async (stream, uri) =>
@@ -1080,20 +1080,24 @@ namespace yande.re
 
 
 
-        async Task SetImage(byte[] buffer)
+        void SetImage(byte[] buffer)
         {
-            if (m_source.Count >= COLL_VIEW_COUNT)
+            MainThread.BeginInvokeOnMainThread(() =>
             {
-                m_source.RemoveAt(0);
+                if (m_source.Count >= COLL_VIEW_COUNT)
+                {
+                    m_source.RemoveAt(0);
+                }
+            });
 
-                await Task.Yield();
-            }
 
-            m_source.Add(new Data(buffer));
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
 
-            m_view.ScrollTo(m_source.Count - 1, position: ScrollToPosition.End, animate: false);
 
-            await Task.Yield();
+                m_source.Add(new Data(buffer));
+
+            });
         }
 
 
@@ -1107,7 +1111,7 @@ namespace yande.re
 
                     var item = await preLoad.ReadAsync();
 
-                    await SetImage(item);
+                    SetImage(item);
 
                     await Task.Delay(timeSpan * 1000);
                 }

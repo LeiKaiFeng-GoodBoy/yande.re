@@ -94,7 +94,7 @@
                         SelectionMode="Single"
                         SelectionChanged="OnCollectionViewSelectionChanged"
                         Scrolled="OnScrolled"
-                        ItemsUpdatingScrollMode="KeepScrollOffset">
+                        ItemsUpdatingScrollMode="KeepLastItemInView">
                 <CollectionView.ItemsLayout>
                     <LinearItemsLayout Orientation="Vertical"
                                    SnapPointsType="Mandatory"
