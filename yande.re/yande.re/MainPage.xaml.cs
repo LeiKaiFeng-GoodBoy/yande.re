@@ -882,8 +882,6 @@ namespace yande.re
 
         readonly Awa m_awa = new Awa();
 
-        int m_count;
-
         Task m_viewTask;
 
         PreLoad m_preLoad;
@@ -1084,31 +1082,14 @@ namespace yande.re
 
         async Task SetImage(byte[] buffer)
         {
-            m_count++;
-
             if (m_source.Count >= COLL_VIEW_COUNT)
             {
-                if (m_count >= FLSH_COUNT)
-                {
-                    m_count = 0;
-
-                    m_source.Clear();
-                }
-                else
-                {
-                    m_source.RemoveAt(0);
-
-
-                }
+                m_source.RemoveAt(0);
 
                 await Task.Yield();
             }
 
-
-
             m_source.Add(new Data(buffer));
-
-            await Task.Yield();
 
             m_view.ScrollTo(m_source.Count - 1, position: ScrollToPosition.End, animate: false);
 

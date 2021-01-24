@@ -93,7 +93,8 @@
             <CollectionView x:Name="m_view"
                         SelectionMode="Single"
                         SelectionChanged="OnCollectionViewSelectionChanged"
-                        Scrolled="OnScrolled">
+                        Scrolled="OnScrolled"
+                        ItemsUpdatingScrollMode="KeepScrollOffset">
                 <CollectionView.ItemsLayout>
                     <LinearItemsLayout Orientation="Vertical"
                                    SnapPointsType="Mandatory"
