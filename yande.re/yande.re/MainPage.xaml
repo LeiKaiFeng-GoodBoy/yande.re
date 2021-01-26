@@ -75,6 +75,12 @@
                        Keyboard="Numeric"></Entry>
             </StackLayout>
             <StackLayout Orientation="Horizontal">
+                <Label Text="TaskCount"></Label>
+                <Entry x:Name="m_task_count_value"
+                       WidthRequest="200"
+                       Keyboard="Numeric"></Entry>
+            </StackLayout>
+            <StackLayout Orientation="Horizontal">
                 <Label Text="ImgCount"></Label>
                 <Entry x:Name="m_imgcount_value"
                        WidthRequest="200"

@@ -550,73 +550,95 @@ namespace yande.re
     sealed class PreLoad
     {
 
-        static async Task GetUrisTask(GetWebSiteContent getContent, ChannelWriter<Uri> uris, CancellationToken cancellationToken)
+        static async Task GetUrisTask(Func<CancellationToken, Task<List<Uri>>> func, ChannelWriter<Uri> uris, CancellationToken cancellationToken)
         {
-            var func = getContent.GetContentFunc();
-
-            try
+               
+            while (true)
             {
-                
-                while (true)
-                {
                     
-                    List<Uri> list;
-                    try
-                    {
+                
+                try
+                {
 
-                        list = await func(cancellationToken).ConfigureAwait(false);
-
-                    }
-                    catch (MHttpClientException)
-                    {
-                        continue;
-                    }
+                    var list = await func(cancellationToken).ConfigureAwait(false);
 
                     foreach (var item in list)
                     {
                         await uris.WriteAsync(item).ConfigureAwait(false);
                     }
                 }
-            }
-            catch (ChannelClosedException)
-            {
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch (ChannelClosedException)
+                {
+                    return;
+                }
+                catch (MHttpClientException)
+                {
 
+                }      
             }
-
         }
 
-        static async Task GetImageTask(GetWebSiteContent getContent, ChannelReader<Uri> uris, ChannelWriter<byte[]> imgs, CancellationToken cancellationToken)
+        static async Task GetImageTask(Func<Uri, CancellationToken, Task<byte[]>> func, ChannelReader<Uri> uris, ChannelWriter<byte[]> imgs, CancellationToken cancellationToken)
         {
-            try
+            while (true)
             {
-                while (true)
+
+                try
                 {
                     Uri uri = await uris.ReadAsync().ConfigureAwait(false);
 
+                    var buffer = await func(uri, cancellationToken).ConfigureAwait(false);
 
-                    var func = getContent.GetImageBytesAsync(uri);
-
-                    byte[] buffer;
-
-                    try
-                    {
-                        buffer = await func(cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (MHttpClientException)
-                    {
-                        continue;
-                    }
 
                     await imgs.WriteAsync(buffer).ConfigureAwait(false);
                 }
-            }
-            catch (ChannelClosedException)
-            {
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch (ChannelClosedException)
+                {
+                    return;
+                }
+                catch (MHttpClientException)
+                {
+                   
+                }
 
             }
         }
 
-        public static PreLoad Create(GetWebSiteContent get_content, int uriCount, int imgCount)
+        static Action<Task> CreateCencelAction(ChannelWriter<Uri> uris, ChannelWriter<byte[]> imgs, CancellationTokenSource source)
+        {
+            return (t) =>
+            {
+                uris.TryComplete();
+
+                imgs.TryComplete();
+
+                source.Cancel();
+            };
+        }
+
+        static Task AddAllTask(int imgCount, Func<Task> func)
+        {
+
+            var list = new List<Task>();
+
+            foreach (var item in Enumerable.Range(0, imgCount))
+            {
+                list.Add(Task.Run(func));
+            }
+
+            return Task.WhenAll(list.ToArray());
+
+        }
+
+        public static PreLoad Create(Func<CancellationToken, Task<List<Uri>>> urisFunc, Func<Uri, CancellationToken, Task<byte[]>> imgsFunc, int uriCount, int imgCount, int taskCount)
         {
             
             var uris = Channel.CreateBounded<Uri>(uriCount);
@@ -625,44 +647,19 @@ namespace yande.re
 
             var cancelSource = new CancellationTokenSource();
 
-
-            var t1 = Task.Run(() => GetUrisTask(get_content, uris, cancelSource.Token));
-
-            t1.ContinueWith((t) => uris.Writer.TryComplete());
+            var cancelAction = CreateCencelAction(uris, imgs, cancelSource);
 
 
+            Task.Run(() => GetUrisTask(urisFunc, uris, cancelSource.Token))
+                .ContinueWith(cancelAction);
 
-
-
-            var list = new List<Task>();
-
-            foreach (var item in Enumerable.Range(0, imgCount))
-            {
-                list.Add(Task.Run(() => GetImageTask(get_content, uris, imgs, cancelSource.Token)));
-            }
-
-            var t2 = Task.WhenAll(list.ToArray());
-
-            t2.ContinueWith((t) =>
-            {
-                uris.Writer.TryComplete();
-
-                imgs.Writer.TryComplete();
-            });
+            AddAllTask(taskCount, () => GetImageTask(imgsFunc, uris, imgs, cancelSource.Token))
+                .ContinueWith(cancelAction);
 
             var v = new PreLoad();
 
-            
-            v.CancelAction = () =>
-            {
 
-                uris.Writer.TryComplete();
-
-                imgs.Writer.TryComplete();
-
-
-                cancelSource.Cancel();
-            };
+            v.CancelAction = () => cancelAction(Task.CompletedTask);
 
             v.ReadFunc = () => Task.Run(() => imgs.Reader.ReadAsync(cancelSource.Token).AsTask());
 
@@ -759,6 +756,12 @@ namespace yande.re
             set => Preferences.Set(nameof(MaxSize), value);
         }
 
+        public static int TaskCount
+        {
+            get => Preferences.Get(nameof(TaskCount), 1);
+            set => Preferences.Set(nameof(TaskCount), value);
+        }
+
         public static int ImgCount
         {
             get => Preferences.Get(nameof(ImgCount), 6);
@@ -787,7 +790,7 @@ namespace yande.re
         }
 
 
-        public static bool Create(string tag, string timeSpan, string timeOut, string maxSize, string imgCount, string pages, string host, string populat)
+        public static bool Create(string taskCount, string tag, string timeSpan, string timeOut, string maxSize, string imgCount, string pages, string host, string populat)
         {
             
             try
@@ -798,6 +801,8 @@ namespace yande.re
                 MaxSize = F(maxSize);
 
                 ImgCount = F(imgCount);
+
+                TaskCount = F(taskCount);
 
                 TimeOut = F(timeOut);
 
@@ -958,12 +963,14 @@ namespace yande.re
 
             m_imgcount_value.Text = InputData.ImgCount.ToString();
 
+            m_task_count_value.Text = InputData.TaskCount.ToString();
+
             m_timeout_value.Text = InputData.TimeOut.ToString();
         }
 
         bool CreateInput()
         {
-            return InputData.Create(m_tag_value.Text, m_timespan_value.Text, m_timeout_value.Text, m_maxsize_value.Text, m_imgcount_value.Text, m_pages_value.Text, m_select_value.SelectedItem.ToString(), m_popular_value.SelectedItem.ToString());
+            return InputData.Create(m_task_count_value.Text, m_tag_value.Text, m_timespan_value.Text, m_timeout_value.Text, m_maxsize_value.Text, m_imgcount_value.Text, m_pages_value.Text, m_select_value.SelectedItem.ToString(), m_popular_value.SelectedItem.ToString());
         }
 
         void SetDateTime(DateTime dateTime)
