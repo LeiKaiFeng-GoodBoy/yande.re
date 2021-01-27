@@ -1234,7 +1234,7 @@ namespace yande.re
                     (v) => MainThread.BeginInvokeOnMainThread(() => SetPages(v)),
                     new TimeSpan(0, 0, InputData.TimeOut),
                     InputData.MaxSize,
-                    InputData.ImgCount));
+                    InputData.TaskCount));
             }
             else
             {
@@ -1249,7 +1249,7 @@ namespace yande.re
                     (d) => MainThread.BeginInvokeOnMainThread(() => SetDateTime(d)),
                     new TimeSpan(0, 0, InputData.TimeOut),
                     InputData.MaxSize,
-                    InputData.ImgCount));
+                    InputData.TaskCount));
             }
 
         }
