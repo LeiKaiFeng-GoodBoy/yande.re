@@ -398,21 +398,25 @@ namespace yande.re
                         }
                         catch (MHttpClientException e)
                         {
-                            if (tokan.IsCancellationRequested)
+                            if (e.InnerException is OperationCanceledException)
                             {
-                                throw;
-                            }
-                            else
-                            {
-                                if (e.InnerException is OperationCanceledException)
+                                if (tokan.IsCancellationRequested)
                                 {
-                                    timeOut += timeSpan;
+                                    throw new OperationCanceledException();
                                 }
                                 else
                                 {
-                                    throw;
+
+                                    timeOut += timeSpan;
                                 }
+
                             }
+                            else
+                            {
+                                throw;
+                            }
+
+                            
 
                         }
                     }
