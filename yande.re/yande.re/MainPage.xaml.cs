@@ -200,6 +200,46 @@ namespace yande.re
             });
         }
 
+
+        static void SetWebInfo(WebInfo webInfo, MHttpClientHandler handler, out Uri host)
+        {
+            handler.ConnectCallback = (socket, uri) => Task.Run(() => socket.Connect(webInfo.DnsHost, 443));
+
+
+            handler.AuthenticateCallback = async (stream, uri) =>
+            {
+                SslStream sslStream = new SslStream(stream, false);
+
+                await sslStream.AuthenticateAsClientAsync(webInfo.SniHost).ConfigureAwait(false);
+
+                return sslStream;
+            };
+
+
+            host = new Uri($"https://{webInfo.HostHost}/");
+        }
+
+        static MHttpClient GetHttpClient(WebSite webSite, int maxSize, int poolCount, out Uri host)
+        {
+
+            var handler = new MHttpClientHandler
+            {
+
+                MaxResponseSize = 1024 * 1024 * maxSize,
+
+                MaxStreamPoolCount = poolCount
+            };
+
+            var v = Xml.GetDeserializeXml<WebInfo[]>(InputData.WebInfo);
+
+            var wv = v.Where((item) => item.Key == webSite.ToString()).First();
+
+            SetWebInfo(wv, handler, out host);
+
+            return new MHttpClient(handler);
+        }
+
+
         public enum WebSite
         {
             Konachan,
@@ -232,55 +272,22 @@ namespace yande.re
             m_timeSpan = timeOut;
         }
 
-        protected abstract void SetView();
+        protected abstract void UpdateViewText();
 
-        protected abstract void SetNext();
+        protected abstract void MoveNext();
 
-
-        static void SetWebInfo(WebInfo webInfo, MHttpClientHandler handler, out Uri host)
-        {
-            handler.ConnectCallback = (socket, uri) => Task.Run(() => socket.Connect(webInfo.DnsHost, 443));
-
-
-            handler.AuthenticateCallback = async (stream, uri) =>
-            {
-                SslStream sslStream = new SslStream(stream, false);
-
-                await sslStream.AuthenticateAsClientAsync(webInfo.SniHost).ConfigureAwait(false);
-
-                return sslStream;
-            };
-
-
-            host = new Uri($"https://{webInfo.HostHost}/");
-        }
-
-        static MHttpClient GetHttpClient(WebSite webSite, int maxSize, int poolCount, out Uri host)
-        {
-           
-            var handler = new MHttpClientHandler
-            {
-
-                MaxResponseSize = 1024 * 1024 * maxSize,
-
-                MaxStreamPoolCount = checked(poolCount * 2)
-            };
-
-            var v = Xml.GetDeserializeXml<WebInfo[]>(InputData.WebInfo);
-            
-            var wv = v.Where((item) => item.Key == webSite.ToString()).First();
-            
-            SetWebInfo(wv, handler, out host);
-
-            return new MHttpClient(handler);
-        }
+        protected abstract string GetPath();
 
         Uri GetUri()
         {
-            return new Uri(m_host, GetUriPath());
-        }
+            UpdateViewText();
 
-        protected abstract string GetUriPath();
+            Uri uri = new Uri(m_host, GetPath());
+
+            MoveNext();
+
+            return uri;
+        }
 
         List<Uri> ParseUris(string html)
         {
@@ -299,56 +306,88 @@ namespace yande.re
         }
 
 
-        public Func<CancellationToken, Task<byte[]>> GetImageBytesAsync(Uri uri)
+        public Func<Uri, CancellationToken, Task<byte[]>> CreateGetImageFunc()
         {
-            Func<CancellationToken, Task<byte[]>> func;
+            var reTryFunc = CreateReTryFunc<byte[]>();
 
-            func = (tokan) => m_request.GetByteArrayAsync(uri, tokan);
+            var timeOutFunc = CreateTimeOutReTryFunc<byte[]>(m_timeSpan, 9);
 
-            return TimeOutReSetAsync(func, m_timeSpan);
+            return (uri, tokan) =>
+            {
+                return reTryFunc((tokan) => timeOutFunc((tokan) => m_request.GetByteArrayAsync(uri, tokan), tokan), tokan);      
+            };
         }
 
-        public Func<CancellationToken, Task<List<Uri>>> GetContentFunc()
-        {
-            int n = 0;
 
-            return async (tokan) =>
+        public Func<CancellationToken, Task<List<Uri>>> CreateGetHtmlFunc()
+        {
+            var reTryFunc = CreateReTryFunc<List<Uri>>();
+
+            var timeOutFunc = CreateTimeOutReTryFunc<List<Uri>>(m_timeSpan, 9);
+
+            var endFunc = CreateHtmlLoadEndFunc();
+
+
+
+            return (tokan) =>
             {
-                
+
+                return endFunc((tokan) =>
+                {
+                    Uri uri = GetUri();
+
+                    Func<CancellationToken, Task<List<Uri>>> func = async (tokan) =>
+                    {
+                        string html = await m_request.GetStringAsync(uri, tokan).ConfigureAwait(false);
+
+                        return ParseUris(html);
+                    };
+
+                    return reTryFunc((tokan) => timeOutFunc(func, tokan), tokan);
+                }, tokan);
+
+
+            };
+        }
+
+
+        static Func<Func<CancellationToken, Task<T>>, CancellationToken, Task<T>> CreateReTryFunc<T>()
+        {
+            return async (func, tokan) =>
+            {
+
                 while (true)
                 {
-                    var func = GetUrisFunc();
-
-                    var list = await func(tokan).ConfigureAwait(false);
-
-                    if (list.Count == 0)
+                    try
                     {
-                        n++;
-
-                        if (n >= 3)
+                        return await func(tokan).ConfigureAwait(false);
+                    }
+                    catch(MHttpClientException e)
+                    {
+                        if (e.InnerException is SocketException ||
+                            e.InnerException is IOException ||
+                            e.InnerException is ObjectDisposedException)
                         {
-                            throw new ChannelClosedException();
+
+                        }
+                        else
+                        {
+                            throw;
                         }
                     }
-                    else
-                    {
-                        n = 0;
 
-                        return list;
-                    }
+                    await Task.Delay(new TimeSpan(0, 0, 2)).ConfigureAwait(false);
                 }
             };
         }
 
-        static Func<CancellationToken, Task<T>> TimeOutReSetAsync<T>(Func<CancellationToken, Task<T>> func, TimeSpan timeSpan)
+        static Func<Func<CancellationToken, Task<T>>, CancellationToken, Task<T>> CreateTimeOutReTryFunc<T>(TimeSpan timeSpan, int maxCount)
         {
-
-            
-            return async (tokan) =>
+            return async (func, tokan) =>
             {
                 var timeOut = timeSpan;
 
-                while (true)
+                foreach (var item in Enumerable.Range(0, maxCount)) 
                 {
                     using (var source = new CancellationTokenSource(timeOut))
                     using (tokan.Register(source.Cancel))
@@ -374,32 +413,44 @@ namespace yande.re
                                     throw;
                                 }
                             }
-                            
+
                         }
                     }
                 }
-            };
 
-            
+                throw new MHttpClientException(new OperationCanceledException());
+            };
         }
 
-        Func<CancellationToken, Task<List<Uri>>> GetUrisFunc()
+        static Func<Func<CancellationToken, Task<List<Uri>>>, CancellationToken, Task<List<Uri>>> CreateHtmlLoadEndFunc()
         {
-            
-            Uri uri = GetUri();
+            int n = 0;
 
-            SetView();
-
-            SetNext();
-
-            Func<CancellationToken, Task<List<Uri>>> func = async (tokan) =>
+            return async (func, tokan) =>
             {
-                string html = await m_request.GetStringAsync(uri, tokan).ConfigureAwait(false);
 
-                return ParseUris(html);
+                while (true)
+                {
+                   
+                    var list = await func(tokan).ConfigureAwait(false);
+
+                    if (list.Count == 0)
+                    {
+                        n++;
+
+                        if (n >= 3)
+                        {
+                            throw new ChannelClosedException();
+                        }
+                    }
+                    else
+                    {
+                        n = 0;
+
+                        return list;
+                    }
+                }
             };
-
-            return TimeOutReSetAsync(func, m_timeSpan);
         }
 
     }
@@ -433,7 +484,7 @@ namespace yande.re
             m_tag = tag.Trim();
         }
 
-        protected override string GetUriPath()
+        protected override string GetPath()
         {
 
             if (string.IsNullOrWhiteSpace(m_tag))
@@ -451,12 +502,12 @@ namespace yande.re
 
         }
 
-        protected override void SetView()
+        protected override void UpdateViewText()
         {
             m_action(m_pages);
         }
 
-        protected override void SetNext()
+        protected override void MoveNext()
         {
             m_pages++;
         }
@@ -495,7 +546,7 @@ namespace yande.re
             m_action = action;
         }
 
-        protected override string GetUriPath()
+        protected override string GetPath()
         {
             string s;
 
@@ -520,12 +571,12 @@ namespace yande.re
             return s;
         }
 
-        protected override void SetView()
+        protected override void UpdateViewText()
         {
             m_action(m_dateTime);
         }
 
-        protected override void SetNext()
+        protected override void MoveNext()
         {
             TimeSpan timeSpan;
 
@@ -1139,8 +1190,8 @@ namespace yande.re
         void Start(GetWebSiteContent get)
         {
 
-           
-            m_preLoad = PreLoad.Create(get, URI_LOAD_COUNT, InputData.ImgCount);
+
+            m_preLoad = PreLoad.Create(get.CreateGetHtmlFunc(), get.CreateGetImageFunc(), URI_LOAD_COUNT, InputData.ImgCount, InputData.TaskCount);
 
 
             
