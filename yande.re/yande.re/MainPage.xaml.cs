@@ -203,17 +203,10 @@ namespace yande.re
 
         static void SetWebInfo(WebInfo webInfo, MHttpClientHandler handler, out Uri host)
         {
-            handler.ConnectCallback = (socket, uri) => Task.Run(() => socket.Connect(webInfo.DnsHost, 443));
+            handler.ConnectCallback = MHttpClientHandler.CreateCreateConnectAsyncFunc(webInfo.DnsHost, 443);
 
 
-            handler.AuthenticateCallback = async (stream, uri) =>
-            {
-                SslStream sslStream = new SslStream(stream, false);
-
-                await sslStream.AuthenticateAsClientAsync(webInfo.SniHost).ConfigureAwait(false);
-
-                return sslStream;
-            };
+            handler.AuthenticateCallback = MHttpClientHandler.CreateCreateAuthenticateAsyncFunc(webInfo.SniHost);
 
 
             host = new Uri($"https://{webInfo.HostHost}/");
