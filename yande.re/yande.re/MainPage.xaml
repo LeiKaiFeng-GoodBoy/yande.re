@@ -4,34 +4,7 @@
              x:Class="yande.re.MainPage"
              xmlns:data="clr-namespace:yande.re">
     <StackLayout>
-        <StackLayout x:Name="m_inputInfo">
-            <Picker x:Name="m_web_info_select_value"
-                    SelectedIndexChanged="OnChangeWebInfoSelect"></Picker>
-            <StackLayout Orientation="Horizontal">
-                <Label Text="DnsHost"></Label>
-                <Entry x:Name="m_dns_host_value"
-                       WidthRequest="200"
-                       Keyboard="Url"></Entry>
-            </StackLayout>
-            <StackLayout Orientation="Horizontal">
-                <Label Text="SniHost"></Label>
-                <Entry x:Name="m_sni_host_value"
-                       WidthRequest="200"
-                       Keyboard="Url"></Entry>
-            </StackLayout>
-            <StackLayout Orientation="Horizontal">
-                <Label Text="HostHost"></Label>
-                <Entry x:Name="m_host_host_value"
-                       WidthRequest="200"
-                       Keyboard="Url"></Entry>
-            </StackLayout>
-            <Button Text="更改"
-                    Clicked="OnChangeWebInfo"></Button>
-            <Button Text="隐藏"
-                    Clicked="OnNotViewWebInfo"></Button>
-        </StackLayout>
-        <StackLayout x:Name="m_cons"
-                     IsVisible="false">
+        <StackLayout x:Name="m_cons">
             <StackLayout x:Name="m_datetime_value_father"
                          Orientation="Horizontal">
                 <Label Text="选择日期"></Label>
@@ -61,6 +34,7 @@
                     SelectedIndexChanged="OnPopularSelect"></Picker>    
             </StackLayout>
             <Button Clicked="OnResetDateTime" Text="重设日期"></Button>
+            <Button Clicked="OnSetWebInfo" Text="设置"></Button>
             <Button Clicked="OnStart" Text="开始"></Button>
             <StackLayout Orientation="Horizontal">
                 <Label Text="TimeSpan"></Label>

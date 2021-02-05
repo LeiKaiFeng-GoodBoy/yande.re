@@ -15,6 +15,7 @@ using System.Threading.Channels;
 using System.Threading;
 using System.Xml.Serialization;
 using System.Text;
+using System.Text.Json;
 
 namespace yande.re
 {
@@ -116,50 +117,117 @@ namespace yande.re
         }
     }
 
-
-    [Serializable]
     public sealed class WebInfo
     {
         public string Key { get; set; }
 
 
-        public string DnsHost { get; set; }
+        public string HtmlDns { get; set; }
 
 
-        public string SniHost { get; set; }
+        public string HtmlSni { get; set; }
 
-        public string HostHost { get; set; }
+        public string HtmlHost { get; set; }
 
         
+        public string ImgDns { get; set; }
+
+        public string ImgSni { get; set; }
+
+        public string ImgHost { get; set; }
+
     }
 
-    static class Xml
+    public sealed class WebInfoHelper
     {
-        public static T GetDeserializeXml<T>(string xml)
+        static bool Is(string s)
         {
-            XmlSerializer serializer = new XmlSerializer(typeof(T));
+            if (s is null)
+            {
+                return false;
+            }
 
+            try
+            {
+                new Uri($"http://{s.Trim()}/");
 
-
-            return (T)serializer.Deserialize(new MemoryStream(Encoding.UTF8.GetBytes(xml)));
-
-
+                return true;
+            }
+            catch (UriFormatException)
+            {
+                return false;
+            }
         }
 
-
-        public static string GetSerializeXml<T>(T obj)
+        static bool Is(WebInfo webInfo)
         {
-            XmlSerializer serializer = new XmlSerializer(typeof(T));
+            return Is(webInfo.HtmlDns) &&
+                Is(webInfo.HtmlHost) &&
+                Is(webInfo.HtmlSni) &&
+                Is(webInfo.ImgDns) &&
+                Is(webInfo.ImgHost) &&
+                Is(webInfo.ImgSni);
+        }
+
+        static bool Is(WebInfo[] webInfos, out string message)
+        {
+            if (webInfos.All((v) => Is(v)))
+            {
+                if (webInfos.Any((s) => s.Key == GetPagesContent.WebSite.Yandere.ToString()) &&
+                    webInfos.Any((s) => s.Key == GetPagesContent.WebSite.Konachan.ToString()))
+                {
+                    message = "";
+
+                    return true;
+                }
+                else
+                {
+                    message = "网站不匹配";
+
+                    return false;
+                }
+            }
+            else
+            {
+                message = "值不是有效域名";
+
+                return false;
+            }
+        }
+
+        public static bool TryCreate(string s, out string message)
+        {
+            try
+            {
+                if (Is(JsonSerializer.Deserialize<WebInfo[]>(s), out message))
+                {
+                    
+                    return true;
+                }
+                else
+                {
+                    return false;
+                }
 
 
-            MemoryStream memoryStream = new MemoryStream();
 
+                
+            }
+            catch (JsonException)
+            {
+                message = "Json格式错误";
+            }
+            catch (NotSupportedException)
+            {
+                message = "类型错误";
+            }
 
-            serializer.Serialize(memoryStream, obj);
+            return false;
+        }
 
-
-
-            return Encoding.UTF8.GetString(memoryStream.GetBuffer(), 0, checked((int)memoryStream.Position));
+        public static string CreateInputText()
+        {
+            return JsonSerializer.Serialize(JsonSerializer.Deserialize<WebInfo[]>(InputData.WebInfo2), new JsonSerializerOptions { WriteIndented = true });
         }
     }
 
@@ -174,28 +242,40 @@ namespace yande.re
 
         public static string CreateDefInfo()
         {
-            return Xml.GetSerializeXml(new WebInfo[] {
+            return JsonSerializer.Serialize(new WebInfo[] {
 
                 new WebInfo
                 {
                     Key=GetWebSiteContent.WebSite.Konachan.ToString(),
 
-                    DnsHost=new Uri( GetWebSiteContent.Konachan_Host).Host,
+                    HtmlDns=new Uri( GetWebSiteContent.Konachan_Host).Host,
 
-                    SniHost=new Uri( GetWebSiteContent.Konachan_Host).Host,
+                    HtmlSni=new Uri( GetWebSiteContent.Konachan_Host).Host,
 
-                    HostHost=new Uri( GetWebSiteContent.Konachan_Host).Host
+                    HtmlHost=new Uri( GetWebSiteContent.Konachan_Host).Host,
+
+                    ImgDns=new Uri( GetWebSiteContent.Konachan_Host).Host,
+
+                    ImgSni=new Uri( GetWebSiteContent.Konachan_Host).Host,
+
+                    ImgHost=new Uri( GetWebSiteContent.Konachan_Host).Host
                 },
 
                 new WebInfo
                 {
                     Key = GetWebSiteContent.WebSite.Yandere.ToString(),
 
-                    DnsHost=new Uri( GetWebSiteContent.Konachan_Host).Host,
+                    HtmlDns=new Uri( GetWebSiteContent.Konachan_Host).Host,
 
-                    SniHost=new Uri( GetWebSiteContent.Yandere_Host).Host,
+                    HtmlSni=new Uri( GetWebSiteContent.Yandere_Host).Host,
 
-                    HostHost=new Uri( GetWebSiteContent.Yandere_Host).Host
+                    HtmlHost=new Uri( GetWebSiteContent.Yandere_Host).Host,
+
+                    ImgDns=new Uri( GetWebSiteContent.Konachan_Host).Host,
+
+                    ImgSni=new Uri( GetWebSiteContent.Yandere_Host).Host,
+
+                    ImgHost=new Uri( GetWebSiteContent.Yandere_Host).Host
                 }
             });
         }
@@ -203,19 +283,34 @@ namespace yande.re
 
         static void SetWebInfo(WebInfo webInfo, MHttpClientHandler handler, out Uri host)
         {
-            handler.ConnectCallback = MHttpClientHandler.CreateCreateConnectAsyncFunc(webInfo.DnsHost, 443);
+            handler.ConnectCallback = MHttpClientHandler.CreateCreateConnectAsyncFunc(webInfo.HtmlDns, 443);
 
 
-            handler.AuthenticateCallback = MHttpClientHandler.CreateCreateAuthenticateAsyncFunc(webInfo.SniHost);
+            handler.AuthenticateCallback = MHttpClientHandler.CreateCreateAuthenticateAsyncFunc(webInfo.HtmlSni);
 
 
-            host = new Uri($"https://{webInfo.HostHost}/");
+            host = new Uri($"https://{webInfo.HtmlHost}/");
         }
 
-        static MHttpClient GetHttpClient(WebSite webSite, int maxSize, int poolCount, out Uri host)
+        static void SetImgWebInfo(WebInfo webInfo, MHttpClientHandler handler)
+        {
+            handler.ConnectCallback = MHttpClientHandler.CreateCreateConnectAsyncFunc(webInfo.ImgDns, 443);
+
+            handler.AuthenticateCallback = MHttpClientHandler.CreateCreateAuthenticateAsyncFunc(webInfo.ImgSni);
+
+
+        }
+
+        static void GetHttpClient(WebSite webSite, int maxSize, int poolCount, out Uri host, out MHttpClient htmlClient, out MHttpClient imgClient)
         {
 
-            var handler = new MHttpClientHandler
+            
+
+            var v = JsonSerializer.Deserialize<WebInfo[]>(InputData.WebInfo2);
+
+            var wv = v.Where((item) => item.Key == webSite.ToString()).First();
+
+            var imgHandler = new MHttpClientHandler
             {
 
                 MaxResponseSize = 1024 * 1024 * maxSize,
@@ -223,13 +318,17 @@ namespace yande.re
                 MaxStreamPoolCount = poolCount
             };
 
-            var v = Xml.GetDeserializeXml<WebInfo[]>(InputData.WebInfo);
+            SetImgWebInfo(wv, imgHandler);
 
-            var wv = v.Where((item) => item.Key == webSite.ToString()).First();
+            imgClient = new MHttpClient(imgHandler);
 
-            SetWebInfo(wv, handler, out host);
 
-            return new MHttpClient(handler);
+            var htmlHandle = new MHttpClientHandler();
+
+            SetWebInfo(wv, htmlHandle, out host);
+
+            htmlClient = new MHttpClient(htmlHandle);
+
         }
 
 
@@ -252,7 +351,9 @@ namespace yande.re
 
         readonly Regex m_regex = new Regex(@"<a class=""directlink (?:largeimg|smallimg)"" href=""([^""]+)""");
 
-        readonly MHttpClient m_request;
+        readonly MHttpClient m_htmlClient;
+
+        readonly MHttpClient m_imgClient;
 
         readonly Uri m_host;
 
@@ -260,7 +361,7 @@ namespace yande.re
 
         public GetWebSiteContent(WebSite webSite, TimeSpan timeOut, int maxSize, int poolCount)
         {
-            m_request = GetHttpClient(webSite, maxSize, poolCount, out m_host);
+            GetHttpClient(webSite, maxSize, poolCount, out m_host, out m_htmlClient, out m_imgClient);
 
             m_timeSpan = timeOut;
         }
@@ -307,7 +408,7 @@ namespace yande.re
 
             return (uri, tokan) =>
             {
-                return reTryFunc((tokan) => timeOutFunc((tokan) => m_request.GetByteArrayAsync(uri, tokan), tokan), tokan);      
+                return reTryFunc((tokan) => timeOutFunc((tokan) => m_imgClient.GetByteArrayAsync(uri, tokan), tokan), tokan);      
             };
         }
 
@@ -331,7 +432,7 @@ namespace yande.re
 
                     Func<CancellationToken, Task<List<Uri>>> func = async (tokan) =>
                     {
-                        string html = await m_request.GetStringAsync(uri, tokan).ConfigureAwait(false);
+                        string html = await m_htmlClient.GetStringAsync(uri, tokan).ConfigureAwait(false);
 
                         return ParseUris(html);
                     };
@@ -754,10 +855,10 @@ namespace yande.re
     static class InputData
     {
 
-        public static string WebInfo
+        public static string WebInfo2
         {
-            get => Preferences.Get(nameof(WebInfo), GetWebSiteContent.CreateDefInfo());
-            set => Preferences.Set(nameof(WebInfo), value);
+            get => Preferences.Get(nameof(WebInfo2), GetWebSiteContent.CreateDefInfo());
+            set => Preferences.Set(nameof(WebInfo2), value);
         }
 
         public static string Tag
@@ -968,8 +1069,6 @@ namespace yande.re
             InitSelectView();
 
             InitPopularView();
-
-            InitChangeWebInfoSelectView();
 
             SetInput();
 
@@ -1293,86 +1392,9 @@ namespace yande.re
             return true;
         }
 
-        void OnNotViewWebInfo(object sender, EventArgs e)
+        void OnSetWebInfo(object sender, EventArgs e)
         {
-            m_inputInfo.IsVisible = false;
-
-            m_cons.IsVisible = true;
-        }
-
-        void InitChangeWebInfoSelectView()
-        {
-            var vs = Enum.GetNames(typeof(GetWebSiteContent.WebSite));
-
-            m_web_info_select_value.ItemsSource = vs;
-
-            m_web_info_select_value.SelectedIndex = 0;
-
-            OnChangeWebInfoSelect(m_web_info_select_value, EventArgs.Empty);
-        }
-
-        void OnChangeWebInfoSelect(object sender, EventArgs e)
-        {
-            var v = Xml.GetDeserializeXml<WebInfo[]>(InputData.WebInfo);
-
-            string s = m_web_info_select_value.SelectedItem.ToString();
-
-
-            SetWebInfoValue(v.Where((item) => item.Key == s).First());
-        }
-
-
-        void SetWebInfoValue(WebInfo webInfo)
-        {
-            m_dns_host_value.Text = webInfo.DnsHost;
-
-            m_sni_host_value.Text = webInfo.SniHost;
-
-            m_host_host_value.Text = webInfo.HostHost;
-        }
-
-        void OnChangeWebInfo(object sender, EventArgs e)
-        {
-
-
-
-            try
-            {
-                var v = Xml.GetDeserializeXml<WebInfo[]>(InputData.WebInfo);
-
-                string s = m_web_info_select_value.SelectedItem.ToString();
-
-
-                GetWebInfoValue(v.Where((item) => item.Key == s).First());
-
-
-                InputData.WebInfo = Xml.GetSerializeXml(v);
-
-                DisplayAlert("消息", "更改成功", "确定");
-            }
-            catch (FormatException)
-            {
-                DisplayAlert("错误", "uri格式不正确", "确定");
-            }
-        }
-
-
-        static string AsValue(string s)
-        {
-            s = s ?? "";
-
-            s = s.Trim();
-
-            return new Uri($"https://{s}/").Host;
-        }
-
-        void GetWebInfoValue(WebInfo webInfo)
-        {
-            webInfo.DnsHost = AsValue(m_dns_host_value.Text);
-
-            webInfo.SniHost = AsValue(m_sni_host_value.Text);
-
-            webInfo.HostHost = AsValue(m_host_host_value.Text);
+            Navigation.PushModalAsync(new SettingWebInfoPage());
         }
     }
 }
