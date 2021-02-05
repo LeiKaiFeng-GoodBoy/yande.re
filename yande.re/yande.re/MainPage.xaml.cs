@@ -810,7 +810,7 @@ namespace yande.re
 
             v.CancelAction = () => cancelAction(Task.CompletedTask);
 
-            v.ReadFunc = () => Task.Run(() => imgs.Reader.ReadAsync(cancelSource.Token).AsTask());
+            v.ReadFunc = () => imgs.Reader.ReadAsync(cancelSource.Token);
 
             return v;
         }
@@ -818,21 +818,67 @@ namespace yande.re
         Action CancelAction { get; set; }
         
 
-        Func<Task<byte[]>> ReadFunc { get; set; }
+        Func<ValueTask<byte[]>> ReadFunc { get; set; }
 
-        private PreLoad()
-        {
-
-        }
-
-        public Task<byte[]> ReadAsync()
-        {
-            return ReadFunc();
-        }
-
+        
         public void Cencel()
         {
             CancelAction();
+        }
+
+        public Task While(Func<Data, Task<TimeSpan>> func)
+        {
+            return Task.Run(async () =>
+            {
+                try
+                {
+                    while (true)
+                    {
+                        if (m_slim.Wait(TimeSpan.Zero))
+                        {
+                            var data = await ReadFunc().ConfigureAwait(false);
+
+                            var timeSpan = await func(new Data(data)).ConfigureAwait(false);
+
+                            await Task.Delay(timeSpan).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            await Task.Delay(new TimeSpan(0, 0, 2)).ConfigureAwait(false);
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+
+                }
+                catch (ChannelClosedException)
+                {
+
+                }
+
+
+
+
+            });
+        }
+
+
+        ManualResetEventSlim m_slim = new ManualResetEventSlim();
+
+        public void SetWait()
+        {
+            m_slim.Reset();
+        }
+
+        public void SetNotWait()
+        {
+            m_slim.Set();
+        }
+
+        private PreLoad()
+        {
+            SetNotWait();
         }
     }
 
@@ -1034,8 +1080,6 @@ namespace yande.re
 
         readonly ObservableCollection<Data> m_source = new ObservableCollection<Data>();
 
-        readonly Awa m_awa = new Awa();
-
         Task m_viewTask;
 
         PreLoad m_preLoad;
@@ -1210,11 +1254,11 @@ namespace yande.re
             {
                 if (n < 0)
                 {
-                    m_awa.SetAwait();
+                    m_preLoad?.SetWait();
                 }
                 else if (n > 0 && e.LastVisibleItemIndex + 1 == m_source.Count)
                 {
-                    m_awa.SetAdd();
+                    m_preLoad?.SetNotWait();
                 }
             }
         }
@@ -1234,53 +1278,29 @@ namespace yande.re
 
 
 
-        void SetImage(byte[] buffer)
+        Func<Data, Task<TimeSpan>> SetImage(TimeSpan timeSpan)
         {
-            MainThread.BeginInvokeOnMainThread(() =>
+            return (data) =>
             {
-                if (m_source.Count >= COLL_VIEW_COUNT)
+                return MainThread.InvokeOnMainThreadAsync(() =>
                 {
-                    m_source.RemoveAt(0);
-                }
-            });
+                    if (m_source.Count >= COLL_VIEW_COUNT)
+                    {
+                        m_source.RemoveAt(0);
+                    }
 
+                    m_source.Add(data);
 
-            MainThread.BeginInvokeOnMainThread(() =>
-            {
+                    return timeSpan;
+                });
+            };
 
-
-                m_source.Add(new Data(buffer));
-
-            });
-        }
-
-
-        async Task While(PreLoad preLoad, int timeSpan)
-        {
-            try
-            {
-                while (true)
-                {
-                    await m_awa.Get();
-
-                    var item = await preLoad.ReadAsync();
-
-                    SetImage(item);
-
-                    await Task.Delay(timeSpan * 1000);
-                }
-            }
-            catch (ChannelClosedException)
-            {
-
-            }
-            catch (OperationCanceledException)
-            {
-
-            }
 
             
         }
+
+
+        
 
 
         void Start(GetWebSiteContent get)
@@ -1290,8 +1310,8 @@ namespace yande.re
             m_preLoad = PreLoad.Create(get.CreateGetHtmlFunc(), get.CreateGetImageFunc(), URI_LOAD_COUNT, InputData.ImgCount, InputData.TaskCount);
 
 
-            
-            m_viewTask = While(m_preLoad, InputData.TimeSpan);
+
+            m_viewTask = m_preLoad.While(SetImage(new TimeSpan(0, 0, InputData.TimeSpan)));
 
             Log.Write("viewTask", m_viewTask);
         }
