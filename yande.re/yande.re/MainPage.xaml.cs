@@ -313,9 +313,11 @@ namespace yande.re
             var imgHandler = new MHttpClientHandler
             {
 
-                MaxResponseSize = 1024 * 1024 * maxSize,
+                MaxResponseContentSize = 1024 * 1024 * maxSize,
 
-                MaxStreamPoolCount = poolCount
+                MaxStreamPoolCount = poolCount,
+
+                MaxStreamParallelRequestCount = 2
             };
 
             SetImgWebInfo(wv, imgHandler);
