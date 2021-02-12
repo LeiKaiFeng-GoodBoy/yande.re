@@ -315,7 +315,9 @@ namespace yande.re
 
                 MaxStreamPoolCount = poolCount,
 
-                MaxStreamParallelRequestCount = 2
+                MaxStreamParallelRequestCount = 4,
+
+                MaxStreamRequestCount = 30,
             };
 
             SetImgWebInfo(wv, imgHandler);
