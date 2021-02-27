@@ -285,7 +285,7 @@ namespace yande.re
         {
             handler.StreamCallback = MHttpClientHandler.CreateNewConnectAsync(
                 MHttpClientHandler.CreateCreateConnectAsyncFunc(webInfo.HtmlDns, 443),
-                MHttpClientHandler.CreateCreateAuthenticateAsyncFunc(webInfo.HtmlSni));
+                MHttpClientHandler.CreateCreateAuthenticateAsyncFunc(webInfo.HtmlSni, false));
 
 
             host = new Uri($"https://{webInfo.HtmlHost}/");
@@ -293,10 +293,10 @@ namespace yande.re
 
         static void SetImgWebInfo(WebInfo webInfo, MHttpClientHandler handler)
         {
-          
+
             handler.StreamCallback = MHttpClientHandler.CreateNewConnectAsync(
                 MHttpClientHandler.CreateCreateConnectAsyncFunc(webInfo.ImgDns, 443),
-                MHttpClientHandler.CreateCreateAuthenticateAsyncFunc(webInfo.ImgSni));
+                MHttpClientHandler.CreateCreateAuthenticateAsyncFunc(webInfo.ImgSni, false));
         }
 
         static void GetHttpClient(WebSite webSite, int maxSize, int poolCount, out Uri host, out MHttpClient htmlClient, out MHttpClient imgClient)
