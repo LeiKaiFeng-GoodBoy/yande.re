@@ -698,7 +698,7 @@ namespace yande.re
         }
     }
 
-    sealed class PreLoad
+    public sealed class PreLoad
     {
 
         static async Task GetUrisTask(Func<CancellationToken, Task<List<Uri>>> func, ChannelWriter<Uri> uris, CancellationToken cancellationToken)
@@ -884,7 +884,7 @@ namespace yande.re
         }
     }
 
-    sealed class Data
+    public sealed class Data
     {
         public Data(byte[] buffer)
         {
@@ -1080,12 +1080,6 @@ namespace yande.re
 
         const string ROOT_PATH = "/storage/emulated/0/konachan_image";
 
-        readonly ObservableCollection<Data> m_source = new ObservableCollection<Data>();
-
-        Task m_viewTask;
-
-        PreLoad m_preLoad;
-
         public MainPage()
         {
             InitializeComponent();
@@ -1119,26 +1113,17 @@ namespace yande.re
             SetInput();
 
 
-
-            SetViewImageSource();
-
-
-
         }
 
         void ChangeInputVisible(GetWebSiteContent.Popular popular)
         {
             if (popular == GetWebSiteContent.Popular.Pages)
             {
-                m_datetime_value_father.IsVisible = false;
-
-                m_pages_value_father.IsVisible = true;
+                
             }
             else
             {
-                m_datetime_value_father.IsVisible = true;
-
-                m_pages_value_father.IsVisible = false;
+                
             }
         }
 
@@ -1166,21 +1151,31 @@ namespace yande.re
             return InputData.Create(m_task_count_value.Text, m_tag_value.Text, m_timespan_value.Text, m_timeout_value.Text, m_maxsize_value.Text, m_imgcount_value.Text, m_pages_value.Text, m_select_value.SelectedItem.ToString(), m_popular_value.SelectedItem.ToString());
         }
 
-        void SetDateTime(DateTime dateTime)
+        Action<DateTime> SetDateTime(Label label)
         {
-            
-            m_pagesText.Text = dateTime.ToString();
 
-            InputData.DateTime = dateTime;
+            return (dateTime) =>
+            {
+                label.Text = dateTime.ToString();
+
+                InputData.DateTime = dateTime;
+            };
+
+          
 
         }
 
 
-        void SetPages(int n)
+        Action<int> SetPages(Label label)
         {
-            m_pagesText.Text = n.ToString();
+            return (n) =>
+            {
 
-            InputData.Pages = n;
+                label.Text = n.ToString();
+
+                InputData.Pages = n;
+            };
+
         }
 
         void InitPopularView()
@@ -1217,26 +1212,7 @@ namespace yande.re
 
 
 
-        void OnCollectionViewSelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (m_view.SelectedItem != null)
-            {
-
-                Task t = SaveImage(((Data)m_view.SelectedItem).Buffer);
-
-                m_view.SelectedItem = null;
-            }
-        }
-
-        void SetViewImageSource()
-        {
-
-            m_view.ItemsSource = m_source;
-
-
-        }
-
-
+        
         void OnResetDateTime(object sender, EventArgs e)
         {
             m_datetime_value.Date = DateTime.Today;
@@ -1248,50 +1224,24 @@ namespace yande.re
         }
 
 
-        void OnScrolled(object sender, ItemsViewScrolledEventArgs e)
-        {
-            long n = (long)e.VerticalDelta;
-
-            if (n != 0)
-            {
-                if (n < 0)
-                {
-                    m_preLoad?.SetWait();
-                }
-                else if (n > 0 && e.LastVisibleItemIndex + 1 == m_source.Count)
-                {
-                    m_preLoad?.SetNotWait();
-                }
-            }
-        }
+        
 
 
-        static async Task SaveImage(byte[] buffer)
-        {
-            string name = Path.Combine(ROOT_PATH, Path.GetRandomFileName() + ".png");
-
-            using (var file = new FileStream(name, FileMode.Create, FileAccess.Write, FileShare.None, 1, true))
-            {
-
-                await file.WriteAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
-            }
-        }
+        
 
 
-
-
-        Func<Data, Task<TimeSpan>> SetImage(TimeSpan timeSpan)
+        Func<Data, Task<TimeSpan>> SetImage(TimeSpan timeSpan, ObservableCollection<Data> coll)
         {
             return (data) =>
             {
                 return MainThread.InvokeOnMainThreadAsync(() =>
                 {
-                    if (m_source.Count >= COLL_VIEW_COUNT)
+                    if (coll.Count >= COLL_VIEW_COUNT)
                     {
-                        m_source.RemoveAt(0);
+                        coll.RemoveAt(0);
                     }
 
-                    m_source.Add(data);
+                    coll.Add(data);
 
                     return timeSpan;
                 });
@@ -1305,17 +1255,72 @@ namespace yande.re
         
 
 
-        void Start(GetWebSiteContent get)
+        void Start()
         {
 
+            var info = new ViewImageListPageInfo((lable, coll) =>
+            {
+                var get = CreateGet(lable);
 
-            m_preLoad = PreLoad.Create(get.CreateGetHtmlFunc(), get.CreateGetImageFunc(), URI_LOAD_COUNT, InputData.ImgCount, InputData.TaskCount);
+                var preLoad = PreLoad.Create(get.CreateGetHtmlFunc(), get.CreateGetImageFunc(), URI_LOAD_COUNT, InputData.ImgCount, InputData.TaskCount);
+
+                var task = preLoad.While(SetImage(new TimeSpan(0, 0, InputData.TimeSpan), coll));
+
+                Log.Write("viewTask", task);
+
+                return preLoad;
+            }, ROOT_PATH);
 
 
 
-            m_viewTask = m_preLoad.While(SetImage(new TimeSpan(0, 0, InputData.TimeSpan)));
+            Navigation.PushModalAsync(new ViewImageListPage(info));
+        }
 
-            Log.Write("viewTask", m_viewTask);
+        GetWebSiteContent CreateGet(Label label)
+        {
+            Directory.CreateDirectory(ROOT_PATH);
+
+            var webSite = (GetWebSiteContent.WebSite)Enum.Parse(typeof(GetWebSiteContent.WebSite), InputData.Host);
+
+            var p = (GetWebSiteContent.Popular)Enum.Parse(typeof(GetWebSiteContent.Popular), InputData.Popular);
+
+            if (p == GetWebSiteContent.Popular.Pages)
+            {
+                int n = InputData.Pages;
+
+                string tag = InputData.Tag;
+
+                var setText = SetPages(label);
+
+                setText(n);
+
+                return new GetPagesContent(
+                    webSite,
+                    tag,
+                    n,
+                    (v) => MainThread.BeginInvokeOnMainThread(() => setText(v)),
+                    new TimeSpan(0, 0, InputData.TimeOut),
+                    InputData.MaxSize,
+                    InputData.TaskCount);
+            }
+            else
+            {
+                DateTime dateTime = m_datetime_value.Date;
+
+                var setText = SetDateTime(label);
+
+                setText(dateTime);
+
+                return new GetDateTimeContent(
+                    webSite,
+                    p,
+                    dateTime,
+                    (d) => MainThread.BeginInvokeOnMainThread(() => setText(d)),
+                    new TimeSpan(0, 0, InputData.TimeOut),
+                    InputData.MaxSize,
+                    InputData.TaskCount);
+            }
+
         }
 
         void OnStart(object sender, EventArgs e)
@@ -1323,95 +1328,11 @@ namespace yande.re
             if (CreateInput() == false)
             {
                 Task t = DisplayAlert("错误", "Input Error", "确定");
-
-                return;
-            }
-
-            m_cons.IsVisible = false;
-
-            m_viewCons.IsVisible = true;
-
-            Directory.CreateDirectory(ROOT_PATH);
-
-            var webSite = (GetWebSiteContent.WebSite)Enum.Parse(typeof(GetWebSiteContent.WebSite), InputData.Host);
-
-            var p = (GetWebSiteContent.Popular)Enum.Parse(typeof(GetWebSiteContent.Popular), InputData.Popular);
-
-            if(p == GetWebSiteContent.Popular.Pages)
-            {
-                int n = InputData.Pages;
-
-                string tag = InputData.Tag;
-
-                SetPages(n);
-
-                Start(new GetPagesContent(
-                    webSite,
-                    tag,
-                    n,
-                    (v) => MainThread.BeginInvokeOnMainThread(() => SetPages(v)),
-                    new TimeSpan(0, 0, InputData.TimeOut),
-                    InputData.MaxSize,
-                    InputData.TaskCount));
             }
             else
             {
-                DateTime dateTime = m_datetime_value.Date;
-
-                SetDateTime(dateTime);
-
-                Start(new GetDateTimeContent(
-                    webSite,
-                    p,
-                    dateTime,
-                    (d) => MainThread.BeginInvokeOnMainThread(() => SetDateTime(d)),
-                    new TimeSpan(0, 0, InputData.TimeOut),
-                    InputData.MaxSize,
-                    InputData.TaskCount));
-            }
-
-        }
-
-        protected override bool OnBackButtonPressed()
-        {
-            if (m_preLoad is null || m_viewTask is null)
-            {
-
-            }
-            else
-            {
-                var t = m_viewTask;
-
-                m_viewTask = null;
-
-                var p = m_preLoad;
-
-                m_preLoad = null;
-
-
-                t.ContinueWith((tt) =>
-                {
-                    MainThread.BeginInvokeOnMainThread(() =>
-                    {
-
-                        m_source.Clear();
-
-                        m_cons.IsVisible = true;
-
-                        m_viewCons.IsVisible = false;
-
-                        SetInput();
-
-                    });
-
-                });
-
-                p.Cencel();
-
-                DisplayAlert("消息", "正在取消", "确定");
-            }
-
-            return true;
+                Start();
+            }      
         }
 
         void OnSetWebInfo(object sender, EventArgs e)
