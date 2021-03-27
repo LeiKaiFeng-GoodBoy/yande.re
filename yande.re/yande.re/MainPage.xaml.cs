@@ -1238,12 +1238,29 @@ namespace yande.re
                 {
                     if (coll.Count >= COLL_VIEW_COUNT)
                     {
-                        coll.RemoveAt(0);
+                        var item = coll.Last();
+
+                        coll.Clear();
+
+                        coll.Add(item);
+
+                        Task.Delay(timeSpan).ContinueWith((t) =>
+                        {
+                            MainThread.InvokeOnMainThreadAsync(() =>
+                            {
+                                coll.Add(data);
+                            });
+                        });
+
+
+                        return timeSpan.Add(timeSpan).Add(timeSpan);
                     }
+                    else
+                    {
+                        coll.Add(data);
 
-                    coll.Add(data);
-
-                    return timeSpan;
+                        return timeSpan;
+                    }                
                 });
             };
 
